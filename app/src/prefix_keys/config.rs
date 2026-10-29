@@ -26,7 +26,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("7", "workspace:activate_seventh_tab"),
     ("8", "workspace:activate_eighth_tab"),
     ("9", "workspace:activate_last_tab"),
-    ("^", "workspace:activate_prev_tab"),
+    ("^", "workspace:activate_last_active_tab"),
     (",", "workspace:rename_active_tab"),
 ];
 
