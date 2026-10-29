@@ -376,6 +376,18 @@ impl Matcher {
         }
         MatchResult::None
     }
+
+    pub fn match_binding_name(&self, name: &str, ctx: &Context) -> MatchResult {
+        if name.is_empty() {
+            return MatchResult::None;
+        }
+        self.keymap
+            .bindings()
+            .find(|binding| binding.name == name && binding.context_predicate.eval(ctx))
+            .map_or(MatchResult::None, |binding| {
+                MatchResult::Action(binding.action.clone())
+            })
+    }
 }
 
 #[cfg(test)]

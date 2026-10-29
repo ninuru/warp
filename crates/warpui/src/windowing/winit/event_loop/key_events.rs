@@ -147,6 +147,7 @@ pub fn convert_keyboard_input_event(
             left_alt: window_state.left_alt_pressed,
             right_alt: window_state.right_alt_pressed,
             key_without_modifiers,
+            is_repeat: input.repeat,
         },
         is_composing: false,
     })

@@ -121,6 +121,7 @@ fn key_event_to_tui_event(event: KeyEvent) -> Option<TuiEvent> {
         chars: produced_chars(event, cfg!(windows)),
         details: KeyEventDetails {
             key_without_modifiers: key_without_modifiers(event.code),
+            is_repeat: event.kind == KeyEventKind::Repeat,
             ..Default::default()
         },
         is_composing: false,
