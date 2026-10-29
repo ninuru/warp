@@ -68,6 +68,8 @@ use crate::{
 #[cfg(feature = "tui")]
 mod tui;
 
+mod key_interceptor;
+
 lazy_static! {
     static ref LAST_USER_ACTION_UNIX_TIMESTAMP: AtomicI64 = AtomicI64::new(0);
 }
@@ -683,6 +685,8 @@ pub struct AppContext {
     /// before they are dispatched.
     event_munger: Box<EventMunger>,
 
+    key_interceptor: Option<Box<key_interceptor::KeyInterceptor>>,
+
     /// Callback invoked before opening any URL.
     before_open_url_callback: Box<BeforeOpenUrlCallback>,
 
@@ -836,6 +840,7 @@ impl AppContext {
             global_shortcuts: Default::default(),
             next_frame_callbacks: Default::default(),
             event_munger: Box::new(|_evt, _ctx| {}),
+            key_interceptor: None,
             before_open_url_callback: Box::new(|url, _ctx| url.to_owned()),
             a11y_verbosity: Default::default(),
             platform_modal_data_map: Default::default(),
@@ -3554,6 +3559,13 @@ impl AppContext {
         // local variable, then swap it back after.
         event_munger(&mut event, self);
         std::mem::swap(&mut event_munger, &mut self.event_munger);
+
+        if self.key_bindings_enabled(window_id) && self.run_key_interceptor(&event, window_id) {
+            return crate::windowing::EventDispatchResult {
+                handled: true,
+                ..Default::default()
+            };
+        }
 
         let mut keystroke_handled = false;
         if self.key_bindings_enabled(window_id) {
