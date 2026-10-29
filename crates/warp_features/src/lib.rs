@@ -1003,6 +1003,7 @@ pub enum FeatureFlag {
     /// from the remote. Disabling it restores direct, network-only checkouts.
     GitMirrorCache,
     AgentPromptSteering,
+    PrefixKeys,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =

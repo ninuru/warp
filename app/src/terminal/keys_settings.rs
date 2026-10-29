@@ -1,5 +1,6 @@
 use settings::macros::define_settings_group;
 use settings::{RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud};
+use warp_core::features::FeatureFlag;
 use warp_errors::{report_error, report_if_error};
 use warpui::keymap::Keystroke;
 use warpui::{AppContext, DisplayIdx, ModelContext};
@@ -71,6 +72,18 @@ define_settings_group!(KeysSettings, settings: [
         private: false,
         toml_path: "keys.ctrl_tab_behavior_setting",
         description: "Controls the behavior of Ctrl+Tab.",
+    }
+    prefix_keys: PrefixKeysSetting {
+        type: crate::prefix_keys::PrefixKeysConfig,
+        default: crate::prefix_keys::PrefixKeysConfig::default(),
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "keys.prefix",
+        max_table_depth: 2,
+        description: "Configuration for the tmux-style prefix key and its bindings.",
+        feature_flag: FeatureFlag::PrefixKeys,
     }
 ]);
 

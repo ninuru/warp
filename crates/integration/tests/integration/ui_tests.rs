@@ -389,4 +389,10 @@ integration_tests! {
     test_rich_input_toggle_on_enter_inserts_newline_and_ctrl_enter_submits,
     // Regression: Enter must accept inline menus (not insert newline) when toggle=true
     test_rich_input_enter_accepts_menu_item_when_toggle_is_true,
+
+    test_prefix_new_tab,
+    test_prefix_split_right,
+    test_prefix_twice_passes_through,
+    test_prefix_timeout_cancels,
+    test_prefix_escape_cancels,
 }
