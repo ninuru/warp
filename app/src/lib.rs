@@ -55,6 +55,7 @@ mod palette;
 mod persistence;
 mod platform;
 mod prefix;
+mod prefix_keys;
 #[cfg(target_os = "macos")]
 mod preview_config_migration;
 mod pricing;
@@ -1964,6 +1965,10 @@ pub(crate) fn initialize_app(
         apply_extra_meta_keys(event, extra_meta_keys);
         apply_scroll_multiplier(event, ctx);
     });
+
+    if FeatureFlag::PrefixKeys.is_enabled() {
+        prefix_keys::init(ctx);
+    }
 
     // Rewrite recognized Warp web URLs (sessions, Drive, settings, home) into local
     // intent URLs when possible so they open directly in the desktop app.

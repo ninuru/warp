@@ -43,6 +43,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::InBandGeneratorsForSSH,
         #[cfg(feature = "run_generators_with_cmd_exe")]
         FeatureFlag::RunGeneratorsWithCmdExe,
+        #[cfg(feature = "prefix_keys")]
+        FeatureFlag::PrefixKeys,
         #[cfg(feature = "ligatures")]
         FeatureFlag::Ligatures,
         #[cfg(feature = "selectable_prompt")]
