@@ -639,6 +639,14 @@ pub fn init(app: &mut AppContext) {
         .with_mac_key_binding("shift-cmd-}")
         .with_linux_or_windows_key_binding("ctrl-pagedown"),
         EditableBinding::new(
+            "workspace:activate_last_active_tab",
+            "Switch to last active tab",
+            WorkspaceAction::ActivateLastActiveTab,
+        )
+        .with_context_predicate(id!("Workspace") & id!("Workspace_MultipleTabs"))
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_enabled(|| FeatureFlag::PrefixKeys.is_enabled()),
+        EditableBinding::new(
             "pane_group:navigate_prev",
             "Activate previous pane",
             WorkspaceAction::NavigatePrevPaneOrPanel,

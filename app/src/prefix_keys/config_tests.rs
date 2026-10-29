@@ -64,7 +64,7 @@ fn defaults_map_tmux_keys() {
     );
     assert_eq!(
         keymap.binding_for(&key("shift-^")),
-        Some("workspace:activate_prev_tab")
+        Some("workspace:activate_last_active_tab")
     );
     assert_eq!(
         keymap.binding_for(&key(",")),

@@ -1557,7 +1557,7 @@ pub(crate) fn mock_workspace_viewing_shared_session(app: &mut App) -> ViewHandle
 
 /// Disable the warn-before-quit setting. Because we don't fully bootstrap the shell in tests, this
 /// is generally needed in tests that close tabs.
-fn disable_quit_warning(app: &mut AppContext) {
+pub(crate) fn disable_quit_warning(app: &mut AppContext) {
     GeneralSettings::handle(app).update(app, |settings, ctx| {
         settings
             .show_warning_before_quitting
