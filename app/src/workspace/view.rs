@@ -17,6 +17,7 @@ pub(crate) mod onboarding;
 pub(crate) mod openwarp_launch_modal;
 pub(crate) mod orchestration_launch_modal;
 mod prefix_indicator;
+mod projects;
 pub(crate) mod right_panel;
 mod startup_directory;
 mod tab_grouping;
@@ -122,6 +123,7 @@ use warpui::{
     UpdateModel, UpdateView, View, ViewAsRef, ViewContext, ViewHandle, WeakViewHandle, WindowId,
 };
 
+use self::projects::{ProjectRef, ProjectSession};
 use self::vertical_tabs::telemetry::{VerticalTabsDisplayOption, VerticalTabsTelemetryEvent};
 use self::vertical_tabs::{
     SummaryPaneKind, SummaryPaneKindIcons, VERTICAL_TABS_SETTINGS_BUTTON_POSITION_ID,
@@ -1059,6 +1061,9 @@ pub struct Workspace {
     traffic_light_mouse_states: TrafficLightMouseStates,
     /// Tab groups in this workspace, keyed by id.
     pub(crate) tab_groups: HashMap<TabGroupId, TabGroup>,
+    active_project: ProjectRef,
+    hidden_projects: Vec<ProjectSession>,
+    previous_project: Option<PathBuf>,
     /// Per-group hover state for the horizontal tab bar.
     horizontal_tab_group_mouse_states: RefCell<HashMap<TabGroupId, HorizontalTabGroupMouseStates>>,
     tab_rename_editor: ViewHandle<EditorView>,
@@ -3460,6 +3465,9 @@ impl Workspace {
             tab_bar_hover_state: Default::default(),
             traffic_light_mouse_states: Default::default(),
             tab_groups: HashMap::new(),
+            active_project: ProjectRef::home(),
+            hidden_projects: Vec::new(),
+            previous_project: None,
             horizontal_tab_group_mouse_states: RefCell::default(),
             tab_rename_editor: Self::tab_rename_editor(ctx),
             pane_rename_editor: Self::pane_rename_editor(ctx),
@@ -5419,6 +5427,15 @@ impl Workspace {
     }
 
     pub fn tab_views(&self) -> impl Iterator<Item = &ViewHandle<PaneGroup>> {
+        self.visible_tab_views().chain(
+            self.hidden_projects
+                .iter()
+                .flat_map(ProjectSession::live_tabs)
+                .map(|tab| &tab.pane_group),
+        )
+    }
+
+    pub fn visible_tab_views(&self) -> impl Iterator<Item = &ViewHandle<PaneGroup>> {
         self.tabs.iter().map(|s| &s.pane_group)
     }
 
@@ -11907,7 +11924,7 @@ impl Workspace {
             None
         };
         let tabs: Vec<TabSnapshot> = self
-            .tab_views()
+            .visible_tab_views()
             .enumerate()
             .filter(|(tab_index, _)| Some(*tab_index) != transferred_tab_index)
             .map(|(tab_index, pane_group_view)| {
@@ -23839,7 +23856,7 @@ impl Workspace {
         event: &SyncEvent,
         ctx: &mut ViewContext<Self>,
     ) {
-        for tab in self.tab_views() {
+        for tab in self.visible_tab_views() {
             // We have to get the latest SyncInputStatus each iteration because
             // tab.update below could potentially change it.
             let synced_pane_group_ids = SyncedInputState::as_ref(ctx);
@@ -23883,7 +23900,7 @@ impl Workspace {
             data: terminal::view::SyncInputType::StopSyncing,
         };
 
-        for tab in self.tab_views() {
+        for tab in self.visible_tab_views() {
             // We have to get the latest SyncInputStatus each iteration because
             // tab.update below could potentially change it.
             let synced_pane_group_ids = SyncedInputState::as_ref(ctx);
