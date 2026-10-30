@@ -1221,7 +1221,7 @@ fn test_sqlite_round_trips_window_projects() {
         project_terminal_tab(2, "/work/api/src", None),
     ];
     window.active_tab_index = 1;
-    window.projects = Some(WindowProjectsSnapshot {
+    window.projects = Some(Box::new(WindowProjectsSnapshot {
         active: ProjectRef::for_root(PathBuf::from("/work/api")),
         previous: Some(PathBuf::from("/work/web")),
         hidden: vec![
@@ -1249,7 +1249,7 @@ fn test_sqlite_round_trips_window_projects() {
                 active_tab_index: 0,
             },
         ],
-    });
+    }));
     let app_state = AppState {
         windows: vec![window],
         active_window_index: Some(0),

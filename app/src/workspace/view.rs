@@ -4129,7 +4129,7 @@ impl Workspace {
                 if FeatureFlag::ProjectSessions.is_enabled()
                     && let Some(projects) = window_snapshot.projects
                 {
-                    self.restore_projects(projects, block_lists);
+                    self.restore_projects(*projects, block_lists);
                 }
 
                 if self.tab_count() == 0 {
@@ -11936,7 +11936,7 @@ impl Workspace {
         let tab_groups = tab_group_snapshots(&tabs, &self.tab_groups);
         let projects = FeatureFlag::ProjectSessions
             .is_enabled()
-            .then(|| self.projects_snapshot(window_id, app));
+            .then(|| Box::new(self.projects_snapshot(window_id, app)));
 
         let resizable_data = ResizableData::handle(app);
         let modal_sizes = resizable_data.as_ref(app).get_all_handles(window_id);

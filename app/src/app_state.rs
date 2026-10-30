@@ -62,7 +62,7 @@ pub struct WindowSnapshot {
     /// Tab groups defined in this window. Group order is implicit from
     /// member tabs' positions, so no explicit ordering is persisted.
     pub tab_groups: Vec<TabGroupSnapshot>,
-    pub projects: Option<WindowProjectsSnapshot>,
+    pub projects: Option<Box<WindowProjectsSnapshot>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
