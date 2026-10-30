@@ -17,6 +17,7 @@ pub(crate) mod onboarding;
 pub(crate) mod openwarp_launch_modal;
 pub(crate) mod orchestration_launch_modal;
 mod prefix_indicator;
+mod project_chip;
 pub(crate) mod projects;
 pub(crate) mod right_panel;
 mod startup_directory;
@@ -1069,6 +1070,8 @@ pub struct Workspace {
     tab_rename_editor: ViewHandle<EditorView>,
     pane_rename_editor: ViewHandle<EditorView>,
     tab_group_rename_editor: ViewHandle<EditorView>,
+    project_rename_editor: ViewHandle<EditorView>,
+    is_project_being_renamed: bool,
     vertical_tabs_search_input: ViewHandle<EditorView>,
     tips_completed: ModelHandle<TipsCompleted>,
     user_default_shell_unsupported_banner_model_handle: ModelHandle<BannerState>,
@@ -3472,6 +3475,8 @@ impl Workspace {
             tab_rename_editor: Self::tab_rename_editor(ctx),
             pane_rename_editor: Self::pane_rename_editor(ctx),
             tab_group_rename_editor: Self::tab_group_rename_editor(ctx),
+            project_rename_editor: Self::project_rename_editor(ctx),
+            is_project_being_renamed: false,
             vertical_tabs_search_input: Self::vertical_tabs_search_input(ctx),
             tips_completed,
             user_default_shell_unsupported_banner_model_handle,
@@ -5666,20 +5671,25 @@ impl Workspace {
     }
 
     fn update_window_title(&self, ctx: &mut ViewContext<Self>) {
+        let Some(window_title) = self.window_title(ctx) else {
+            return;
+        };
+        let window_id = ctx.window_id();
+        ctx.windows().set_window_title(window_id, &window_title);
+    }
+
+    fn window_title(&self, ctx: &AppContext) -> Option<String> {
         let Some(tab) = self.tabs.get(self.active_tab_index) else {
             log::warn!(
                 "Tried to update window title but active tab index ({}) was out of range 0..{}",
                 self.active_tab_index,
                 self.tabs.len()
             );
-            return;
+            return None;
         };
-        let tab_title = tab.pane_group.as_ref(ctx).display_title(ctx);
+        let tab_title = self.project_window_title(tab.pane_group.as_ref(ctx).display_title(ctx));
 
-        let window_title = truncate_from_end(&tab_title, MAX_WINDOW_TITLE_LENGTH);
-
-        let window_id = ctx.window_id();
-        ctx.windows().set_window_title(window_id, &window_title);
+        Some(truncate_from_end(&tab_title, MAX_WINDOW_TITLE_LENGTH))
     }
 
     fn rename_tab_internal(&mut self, index: usize, title: &str, ctx: &mut ViewContext<Self>) {
@@ -7556,6 +7566,7 @@ impl Workspace {
             Some(id) if id == self.tab_group_rename_editor.id() => self
                 .current_workspace_state
                 .is_any_tab_group_being_renamed(),
+            Some(id) if id == self.project_rename_editor.id() => self.is_project_being_renamed,
             _ => false,
         }
     }
@@ -21303,6 +21314,10 @@ impl Workspace {
             }
         }
 
+        if let Some(chip) = self.render_project_chip(appearance, ctx) {
+            tab_bar.add_child(chip);
+        }
+
         if vertical_tabs_active {
             let mut right_controls = Flex::row()
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -24732,6 +24747,7 @@ impl TypedActionView for Workspace {
             ),
             SwitchToPreviousProject => self.switch_to_previous_project(ctx),
             SwitchProject { path } => self.switch_to_project(path.clone(), ctx),
+            RenameProject => self.start_project_rename(ctx),
             ShowUpgrade => {
                 send_telemetry_from_ctx!(TelemetryEvent::UserMenuUpgradeClicked, ctx);
 

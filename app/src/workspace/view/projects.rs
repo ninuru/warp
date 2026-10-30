@@ -28,6 +28,8 @@ pub struct ProjectRef {
 pub(crate) struct ProjectSession {
     pub project: ProjectRef,
     pub tabs: ProjectTabs,
+    pub running: bool,
+    pub finished_unseen: bool,
 }
 
 pub(crate) enum ProjectTabs {
@@ -246,7 +248,10 @@ impl Workspace {
                 }
             }
             Event::SendNotification { .. } => return false,
-            Event::TerminalViewStateChanged => ctx.notify(),
+            Event::TerminalViewStateChanged => {
+                self.update_hidden_project_running(project_index, ctx);
+                ctx.notify();
+            }
             Event::Escape
             | Event::LeftPanelToggled { .. }
             | Event::ExecuteCommand { .. }
@@ -346,6 +351,7 @@ impl Workspace {
 
         self.previous_project = Some(outgoing.project.root.clone());
         self.hidden_projects.push(outgoing);
+        self.update_hidden_project_running(self.hidden_projects.len() - 1, ctx);
 
         if SyncedInputState::as_ref(ctx).is_syncing_any_inputs(ctx.window_id()) {
             self.process_updated_sync_state(ctx);
@@ -480,6 +486,8 @@ impl Workspace {
                     active_tab_index: project.active_tab_index,
                     block_lists: block_lists.clone(),
                 },
+                running: false,
+                finished_unseen: false,
             })
             .collect();
         self.previous_project = previous;
@@ -495,6 +503,8 @@ impl Workspace {
                 tab_mru_order: mem::take(&mut self.tab_mru_order),
                 tab_groups: mem::take(&mut self.tab_groups),
             },
+            running: false,
+            finished_unseen: false,
         }
     }
 
@@ -550,6 +560,7 @@ impl Workspace {
     }
 
     fn reset_tab_ui_state(&mut self, ctx: &mut ViewContext<Self>) {
+        self.cancel_project_rename(ctx);
         self.cancel_tab_rename(ctx);
         self.cancel_tab_group_rename(ctx);
         self.hovered_tab_index = None;

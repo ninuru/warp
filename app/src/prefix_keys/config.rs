@@ -30,6 +30,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("f", "workspace:open_project_picker"),
     ("l", "workspace:switch_to_previous_project"),
     ("s", "workspace:list_open_projects"),
+    ("$", "workspace:rename_project"),
     ("[", "terminal:select_previous_block"),
 ];
 const DEFAULT_ROOT_BINDINGS: &[(&str, &str)] = &[
