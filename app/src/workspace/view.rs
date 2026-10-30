@@ -16,6 +16,7 @@ pub(crate) mod left_panel;
 pub(crate) mod onboarding;
 pub(crate) mod openwarp_launch_modal;
 pub(crate) mod orchestration_launch_modal;
+mod prefix_indicator;
 pub(crate) mod right_panel;
 mod startup_directory;
 mod tab_grouping;
@@ -2986,6 +2987,7 @@ impl Workspace {
         ctx.observe(&TabShortcutModifierState::handle(ctx), |_, _, ctx| {
             ctx.notify();
         });
+        Self::subscribe_to_prefix_keys(ctx);
 
         ctx.observe(&RelaunchModel::handle(ctx), |_, _, ctx| {
             ctx.notify();
@@ -21297,6 +21299,9 @@ impl Workspace {
             let mut right_controls = Flex::row()
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_main_axis_size(MainAxisSize::Min);
+            if let Some(chip) = self.render_prefix_pending_chip(appearance, ctx) {
+                right_controls.add_child(chip);
+            }
 
             self.add_configurable_right_side_tab_bar_controls(
                 &mut right_controls,
@@ -21475,6 +21480,9 @@ impl Workspace {
         // Trailing spacer fills only the leftover width. When groups are collapsed
         // the freed flex is distributed accross the remaining flex items in the tab bar.
         tab_bar.add_child(Shrinkable::new(0.5, Empty::new().finish()).finish());
+        if let Some(chip) = self.render_prefix_pending_chip(appearance, ctx) {
+            tab_bar.add_child(chip);
+        }
 
         self.add_configurable_right_side_tab_bar_controls(
             &mut tab_bar,
@@ -27177,6 +27185,7 @@ impl View for Workspace {
                         ChildAnchor::TopLeft,
                     ),
                 );
+                self.add_prefix_pending_chip_overlay(&mut stack, appearance, app);
             }
         }
 

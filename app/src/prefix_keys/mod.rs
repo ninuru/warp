@@ -7,7 +7,7 @@ use warpui::{AppContext, Event, SingletonEntity, WindowId};
 
 pub use config::PrefixKeysConfig;
 use machine::PrefixOutcome;
-use model::PrefixKeysState;
+pub use model::{PrefixKeysEvent, PrefixKeysState};
 
 pub fn init(ctx: &mut AppContext) {
     ctx.add_singleton_model(PrefixKeysState::new);

@@ -108,6 +108,10 @@ impl PrefixKeymap {
         (keymap, errors)
     }
 
+    pub fn prefix(&self) -> &Keystroke {
+        &self.prefix
+    }
+
     pub fn is_prefix(&self, keystroke: &Keystroke) -> bool {
         key_matches(&self.prefix, keystroke)
     }
