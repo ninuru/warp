@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use strum_macros::IntoStaticStr;
@@ -81,6 +82,9 @@ pub enum CommandPaletteItemAction {
     },
     /// Start a new AI conversation
     NewConversation,
+    SwitchProject {
+        path: PathBuf,
+    },
     /// No-op action (used for non-interactable separator items that don't do anything on click).
     NoOp,
 }
@@ -146,6 +150,7 @@ impl CommandPaletteItemAction {
                 ItemSummary::Project { path: path.clone() }
             }
             CommandPaletteItemAction::NewConversation => ItemSummary::NewConversation,
+            CommandPaletteItemAction::SwitchProject { .. } => ItemSummary::NoOp,
             CommandPaletteItemAction::NoOp => ItemSummary::NoOp,
         }
     }

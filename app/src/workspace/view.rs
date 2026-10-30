@@ -3944,6 +3944,7 @@ impl Workspace {
                 self.sync_panel_positions_from_config(ctx);
                 ctx.notify();
             }
+            TabSettingsChangedEvent::ProjectRoots { .. } => {}
         }
     }
 
@@ -14785,6 +14786,19 @@ impl Workspace {
         ctx.notify();
     }
 
+    fn open_projects_palette(&mut self, ctx: &mut ViewContext<Self>) {
+        let open = self.open_projects().into_iter().rev().collect();
+        let active = self.active_project().root.clone();
+        let data_source_store = self.palette.as_ref(ctx).data_source_store.clone();
+        data_source_store.update(ctx, |store, ctx| store.refresh_projects(open, active, ctx));
+        self.palette.update(ctx, |view, ctx| {
+            view.reset(ctx);
+            view.set_active_query_filter(QueryFilter::ProjectSessions, ctx);
+            view.set_initial_selection_offset(0, ctx);
+        });
+        ctx.notify();
+    }
+
     fn open_ctrl_tab_palette(
         &mut self,
         query_filter: QueryFilter,
@@ -15021,6 +15035,7 @@ impl Workspace {
             PaletteMode::WarpDrive => self.open_warp_drive_palette(ctx),
             PaletteMode::Files => self.open_files_palette(ctx),
             PaletteMode::Conversations => self.open_conversations_palette(ctx),
+            PaletteMode::ProjectSessions => self.open_projects_palette(ctx),
         }
 
         ctx.focus(&self.palette);
@@ -15172,6 +15187,9 @@ impl Workspace {
                         terminal_view.open_repo_folder(path.to_string(), false, ctx);
                     });
                 }
+            }
+            CommandPaletteEvent::SwitchProject { path } => {
+                self.switch_to_project(path.clone(), ctx)
             }
         }
     }
