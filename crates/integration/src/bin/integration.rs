@@ -532,6 +532,7 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
     register_test!(test_prefix_twice_passes_through);
     register_test!(test_prefix_timeout_cancels);
     register_test!(test_prefix_escape_cancels);
+    register_test!(test_prefix_pending_indicator);
 
     tests
 }
