@@ -1004,6 +1004,7 @@ pub enum FeatureFlag {
     GitMirrorCache,
     AgentPromptSteering,
     PrefixKeys,
+    ProjectSessions,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
