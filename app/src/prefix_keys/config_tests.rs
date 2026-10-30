@@ -28,7 +28,7 @@ fn defaults_parse_without_errors() {
     assert!(config.enabled);
     assert!(keymap.is_prefix(&key("ctrl-a")));
     assert_eq!(keymap.timeout(), Duration::from_millis(1500));
-    assert_eq!(keymap.bindings.len(), 23);
+    assert_eq!(keymap.bindings.len(), 24);
     assert_eq!(keymap.root.len(), 15);
 }
 

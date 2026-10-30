@@ -75,7 +75,7 @@ use crate::workspace::view::{
     TOGGLE_VERTICAL_TABS_PANEL_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 
-pub(crate) fn project_bindings() -> [EditableBinding; 3] {
+pub(crate) fn project_bindings() -> [EditableBinding; 4] {
     [
         EditableBinding::new(
             "workspace:open_project_picker",
@@ -97,6 +97,14 @@ pub(crate) fn project_bindings() -> [EditableBinding; 3] {
             "workspace:list_open_projects",
             "List open projects",
             WorkspaceAction::OpenProjectPicker,
+        )
+        .with_context_predicate(id!("Workspace"))
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_enabled(|| FeatureFlag::ProjectSessions.is_enabled()),
+        EditableBinding::new(
+            "workspace:rename_project",
+            "Rename project",
+            WorkspaceAction::RenameProject,
         )
         .with_context_predicate(id!("Workspace"))
         .with_group(bindings::BindingGroup::Navigation.as_str())

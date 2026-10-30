@@ -309,6 +309,7 @@ pub enum WorkspaceAction {
     SwitchProject {
         path: PathBuf,
     },
+    RenameProject,
     ShowUpgrade,
     ShowReferralSettingsPage,
     JoinSlack,
@@ -1015,6 +1016,7 @@ impl WorkspaceAction {
             | OpenRepository { .. }
             | SwitchToPreviousProject
             | SwitchProject { .. }
+            | RenameProject
             | SelectTabConfig(_)
             | ToggleVerticalTabsPanel
             | OpenVerticalTabsPanel => true, // actions that actually change a state of the state of user's
