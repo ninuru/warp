@@ -11,7 +11,7 @@ use crate::workspace::WorkspaceAction;
 use crate::workspace::view::Workspace;
 use crate::workspace::view::tests::{initialize_app, mock_workspace};
 
-fn tab_ids(workspace: &Workspace) -> Vec<EntityId> {
+pub(super) fn tab_ids(workspace: &Workspace) -> Vec<EntityId> {
     workspace
         .tabs
         .iter()
@@ -36,7 +36,7 @@ fn group_states(
     states
 }
 
-fn add_three_tabs_with_mru(workspace: &mut Workspace, ctx: &mut ViewContext<Workspace>) {
+pub(super) fn add_three_tabs_with_mru(workspace: &mut Workspace, ctx: &mut ViewContext<Workspace>) {
     workspace.add_terminal_tab(false, ctx);
     workspace.add_terminal_tab(false, ctx);
     workspace.handle_action(&WorkspaceAction::ActivateTab(2), ctx);
