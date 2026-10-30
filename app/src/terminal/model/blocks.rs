@@ -1,3 +1,4 @@
+mod copy_mode;
 mod selection;
 
 use std::collections::{HashMap, HashSet};
@@ -8,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
+pub use copy_mode::{CopyModeMotion, CopyModeState};
 use instant::SystemTime;
 use rustc_hash::FxHashMap;
 use selection::BlockListSelection;
