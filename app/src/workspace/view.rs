@@ -3826,9 +3826,9 @@ impl Workspace {
     ) {
         if let SessionSettingsChangedEvent::HonorPS1 { .. } = event {
             let honor_ps1 = *session_settings.as_ref(ctx).honor_ps1;
-            for tab in &self.tabs {
+            for pane_group in self.tab_views() {
                 // Each tab has a pane group.
-                tab.pane_group.update(ctx, |pane_group, ctx| {
+                pane_group.update(ctx, |pane_group, ctx| {
                     pane_group.send_prompt_change_bindkey_to_all_sessions(honor_ps1, ctx);
                 });
             }
@@ -3908,7 +3908,7 @@ impl Workspace {
             }
             TabSettingsChangedEvent::DirectoryTabColors { .. } => {
                 if FeatureFlag::DirectoryTabColors.is_enabled() {
-                    for tab in &mut self.tabs {
+                    for tab in self.all_tabs_mut() {
                         Self::sync_codebase_tab_color(tab, ctx);
                     }
                 }
@@ -5383,6 +5383,7 @@ impl Workspace {
         pane_group_id: EntityId,
         ctx: &mut ViewContext<Self>,
     ) {
+        self.reveal_project_for_pane_group(pane_group_id, ctx);
         if let Some(index) = self
             .tabs
             .iter()
@@ -5488,10 +5489,10 @@ impl Workspace {
         window_id: WindowId,
         app: &'a AppContext,
     ) -> impl Iterator<Item = SessionNavigationData> + 'a {
-        self.tabs.iter().flat_map(move |tab| {
+        self.tab_views().flat_map(move |pane_group| {
             // Each tab has a pane group
-            let pane_group_id = tab.pane_group.id();
-            let view = tab.pane_group.as_ref(app);
+            let pane_group_id = pane_group.id();
+            let view = pane_group.as_ref(app);
 
             view.pane_sessions(pane_group_id, window_id, app)
         })
@@ -6049,6 +6050,7 @@ impl Workspace {
     /// Focuses the given pane, revealing it first if it is hidden behind a
     /// temporary swap.
     pub fn focus_pane(&mut self, pane_view_locator: PaneViewLocator, ctx: &mut ViewContext<Self>) {
+        self.reveal_project_for_pane_group(pane_view_locator.pane_group_id, ctx);
         if let Some((index, tab)) = self
             .tabs
             .iter()
@@ -6076,8 +6078,7 @@ impl Workspace {
         terminal_view_id: EntityId,
         ctx: &mut ViewContext<Self>,
     ) -> bool {
-        for tab in self.tabs.iter() {
-            let pane_group_handle = &tab.pane_group;
+        for pane_group_handle in self.tab_views().cloned().collect_vec() {
             let pane_group = pane_group_handle.as_ref(ctx);
             if let Some(pane_id) = pane_group.find_pane_id_for_terminal_view(terminal_view_id, ctx)
             {
@@ -12327,6 +12328,9 @@ impl Workspace {
         // If this is the last tab, close the window instead of actually removing
         // the tab.
         if self.tabs.len() == 1 {
+            if self.close_last_tab_of_project(add_to_undo_stack, detach_panes_for_close, ctx) {
+                return;
+            }
             if ContextFlag::CloseWindow.is_enabled() {
                 ctx.close_window();
             }
@@ -12340,25 +12344,7 @@ impl Workspace {
             detach_panes_for_close && self.try_re_adopt_split_off_child_agent_tab(index, ctx);
 
         if !re_adopted && detach_panes_for_close {
-            let working_directories_model = self.working_directories_model.clone();
-            pane_group.update(ctx, |pane_group, ctx| {
-                pane_group.for_all_terminal_panes(
-                    |terminal_view, ctx| {
-                        if terminal_view
-                            .model
-                            .lock()
-                            .block_list()
-                            .active_block()
-                            .is_active_and_long_running()
-                        {
-                            terminal_view.shutdown_pty(ctx);
-                        }
-                    },
-                    ctx,
-                );
-
-                pane_group.detach_panes_for_close(&working_directories_model, ctx);
-            });
+            self.detach_pane_group_for_close(&pane_group, ctx);
         }
 
         let tab_data = self.tabs.remove(index);
@@ -12376,9 +12362,10 @@ impl Workspace {
         // live pane already moved back.
         if add_to_undo_stack && !re_adopted {
             let handle = ctx.handle();
+            let project_root = self.closed_tab_project_root();
             UndoCloseStack::handle(ctx).update(ctx, |stack, ctx| {
                 log::info!("storing data for closed tab");
-                stack.handle_tab_closed(handle, index, tab_data, ctx);
+                stack.handle_tab_closed(handle, index, tab_data, project_root, ctx);
             });
         }
 
@@ -12404,10 +12391,36 @@ impl Workspace {
         ctx.notify();
     }
 
+    fn detach_pane_group_for_close(
+        &self,
+        pane_group: &ViewHandle<PaneGroup>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let working_directories_model = self.working_directories_model.clone();
+        pane_group.update(ctx, |pane_group, ctx| {
+            pane_group.for_all_terminal_panes(
+                |terminal_view, ctx| {
+                    if terminal_view
+                        .model
+                        .lock()
+                        .block_list()
+                        .active_block()
+                        .is_active_and_long_running()
+                    {
+                        terminal_view.shutdown_pty(ctx);
+                    }
+                },
+                ctx,
+            );
+
+            pane_group.detach_panes_for_close(&working_directories_model, ctx);
+        });
+    }
+
     fn should_confirm_close_session(&self, ctx: &mut ViewContext<Self>) -> bool {
         // If we're closing the only remaining tab, we're actually going to close the window.
         // We don't need a user confirmation here because there's already another one on window close.
-        if self.tab_count() == 1 {
+        if self.is_last_tab_in_window() {
             return false;
         }
         // TODO: remove session sharing flag check when long-running commands are included
@@ -12529,7 +12542,7 @@ impl Workspace {
         add_to_undo_stack: bool,
         ctx: &mut ViewContext<Self>,
     ) {
-        let is_last_tab = self.tabs.len() == 1;
+        let is_last_tab = self.is_last_tab_in_window();
         if !ContextFlag::CloseWindow.is_enabled() && is_last_tab {
             return;
         }
@@ -16324,6 +16337,9 @@ impl Workspace {
         event: &pane_group::Event,
         ctx: &mut ViewContext<Self>,
     ) {
+        if self.consume_hidden_pane_group_event(&pane_group, event, ctx) {
+            return;
+        }
         match event {
             pane_group::Event::AppStateChanged => {
                 ctx.dispatch_global_action("workspace:save_app", ());
@@ -23923,7 +23939,7 @@ impl Workspace {
     }
 
     fn all_pane_group_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.tab_views().map(|tab| tab.id())
+        self.visible_tab_views().map(|tab| tab.id())
     }
 
     fn team_uid(&self, app: &AppContext) -> Option<ServerId> {
