@@ -261,7 +261,7 @@ pub(crate) fn target_pane_group(
     workspace.read(ctx, |workspace, ctx| {
         let tab_index = tab_index_from_target(target, workspace, ctx)?;
         workspace
-            .tab_views()
+            .visible_tab_views()
             .nth(tab_index)
             .cloned()
             .ok_or_else(|| {
@@ -398,7 +398,7 @@ pub(crate) fn tab_index_from_target(
             }),
         Some(TabTarget::Active) | None => Ok(workspace.active_tab_index()),
         Some(TabTarget::Id { id }) => workspace
-            .tab_views()
+            .visible_tab_views()
             .enumerate()
             .find_map(|(index, pane_group)| (pane_group.id().to_string() == id.0).then_some(index))
             .ok_or_else(|| {
@@ -409,7 +409,7 @@ pub(crate) fn tab_index_from_target(
             }),
         Some(TabTarget::Title { title }) => {
             let matching = workspace
-                .tab_views()
+                .visible_tab_views()
                 .enumerate()
                 .filter_map(|(index, pane_group)| {
                     (pane_group.as_ref(ctx).display_title(ctx) == *title).then_some(index)

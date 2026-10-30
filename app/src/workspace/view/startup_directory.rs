@@ -52,6 +52,9 @@ impl Workspace {
         chosen_shell: Option<&AvailableShell>,
         ctx: &mut ViewContext<Self>,
     ) -> Option<PathBuf> {
+        if let Some(root) = self.project_startup_directory(new_session_source, ctx) {
+            return Some(root);
+        }
         // Get the Workspace from the window that hosted the previously-active
         // session.
         let active_session_info = match previous_session_window_id {
