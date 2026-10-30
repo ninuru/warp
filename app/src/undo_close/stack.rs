@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use uuid::Uuid;
 use warp_errors::report_error;
 use warpui::r#async::SpawnedFutureHandle;
@@ -62,6 +64,7 @@ pub enum ClosedItem {
         workspace: WeakViewHandle<Workspace>,
         tab_index: usize,
         data: TabData,
+        project_root: Option<PathBuf>,
     },
     Pane {
         data: PaneData,
@@ -222,6 +225,7 @@ impl UndoCloseStack {
         workspace: WeakViewHandle<Workspace>,
         tab_index: usize,
         data: TabData,
+        project_root: Option<PathBuf>,
         ctx: &mut ModelContext<Self>,
     ) {
         self.push_item(
@@ -229,6 +233,7 @@ impl UndoCloseStack {
                 workspace,
                 tab_index,
                 data,
+                project_root,
             },
             ctx,
         );
@@ -288,6 +293,7 @@ impl UndoCloseStack {
                 workspace,
                 tab_index,
                 data,
+                project_root,
             } => {
                 if let Some(workspace) = workspace.upgrade(ctx) {
                     send_telemetry_from_app_ctx!(
@@ -297,6 +303,9 @@ impl UndoCloseStack {
                         ctx
                     );
                     workspace.update(ctx, |workspace, ctx| {
+                        if let Some(root) = project_root {
+                            workspace.switch_to_open_project(root, ctx);
+                        }
                         workspace.restore_closed_tab(tab_index, data, ctx);
                     });
                     ctx.windows()
