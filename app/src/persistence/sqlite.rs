@@ -59,9 +59,10 @@ use super::model::{
     self, AI_DOCUMENT_PANE_KIND, AI_FACT_PANE_KIND, ActiveMCPServer, CODE_PANE_KIND,
     CurrentUserInformation, ENV_VAR_COLLECTION_PANE_KIND, EXECUTION_PROFILE_EDITOR_PANE_KIND,
     MCP_SERVER_PANE_KIND, MCPEnvironmentVariables, NOTEBOOK_PANE_KIND, NewActiveMCPServer, NewApp,
-    NewCommand, NewServerExperiment, NewTab, NewTabGroup, NewTeam, NewWindow, NewWorkspace,
-    NewWorkspaceMetadata, NewWorkspaceTeam, Project, SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, Tab,
-    TabGroup, WORKFLOW_PANE_KIND, Window, WorkspaceMetadata as WorkspaceMetadataModel,
+    NewCommand, NewServerExperiment, NewTab, NewTabGroup, NewTeam, NewWindow, NewWindowProject,
+    NewWorkspace, NewWorkspaceMetadata, NewWorkspaceTeam, Project, SETTINGS_PANE_KIND,
+    TERMINAL_PANE_KIND, Tab, TabGroup, WORKFLOW_PANE_KIND, Window, WindowProject,
+    WorkspaceMetadata as WorkspaceMetadataModel,
 };
 use super::{
     BlockCompleted, FinishedCommandMetadata, ModelEvent, PersistedData, PersistedDataScope,
@@ -76,8 +77,9 @@ use crate::app_state::{
     AIFactPaneSnapshot, AmbientAgentPaneSnapshot, AppState, BranchSnapshot, CodePaneSnapShot,
     CodePaneTabSnapshot, CodeReviewPaneSnapshot, EnvVarCollectionPaneSnapshot, LeafContents,
     LeafSnapshot, LeftPanelSnapshot, NotebookPaneSnapshot, PaneFlex, PaneNodeSnapshot,
-    RightPanelSnapshot, SettingsPaneSnapshot, SplitDirection, TabGroupSnapshot, TabSnapshot,
-    TerminalPaneSnapshot, WindowSnapshot, WorkflowPaneSnapshot,
+    ProjectSnapshot, RightPanelSnapshot, SettingsPaneSnapshot, SplitDirection, TabGroupSnapshot,
+    TabSnapshot, TerminalPaneSnapshot, WindowProjectsSnapshot, WindowSnapshot,
+    WorkflowPaneSnapshot,
 };
 use crate::auth::UserUid;
 use crate::auth::auth_manager::PersistedCurrentUserInformation;
@@ -109,6 +111,7 @@ use crate::terminal::history::PersistedCommand;
 use crate::themes::theme::AnsiColorIdentifier;
 use crate::workflows::WorkflowId;
 use crate::workspace::tab_group::TabGroupId;
+use crate::workspace::view::projects::ProjectRef;
 use crate::workspaces::team::Team as TeamMetadata;
 use crate::workspaces::user_profiles::{UserProfileWithUID, user_profile_from_persistence};
 use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
@@ -935,6 +938,7 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
         diesel::delete(schema::pane_nodes::dsl::pane_nodes).execute(conn)?;
         diesel::delete(schema::tabs::dsl::tabs).execute(conn)?;
         diesel::delete(schema::tab_groups::dsl::tab_groups).execute(conn)?;
+        diesel::delete(schema::window_projects::dsl::window_projects).execute(conn)?;
         diesel::delete(schema::windows::dsl::windows).execute(conn)?;
         diesel::delete(schema::active_mcp_servers::dsl::active_mcp_servers).execute(conn)?;
         diesel::delete(schema::panels::dsl::panels).execute(conn)?;
@@ -1007,10 +1011,23 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
 
             // Insert tab groups first so we can map each `TabGroupId` to a
             // DB row id when inserting the tabs below.
+            let hidden_projects = window
+                .projects
+                .as_ref()
+                .map(|projects| projects.hidden.as_slice())
+                .unwrap_or_default();
+            let all_tab_groups: Vec<&TabGroupSnapshot> = window
+                .tab_groups
+                .iter()
+                .chain(
+                    hidden_projects
+                        .iter()
+                        .flat_map(|project| &project.tab_groups),
+                )
+                .collect();
             let mut tab_group_row_ids: HashMap<TabGroupId, i32> = HashMap::new();
-            if !window.tab_groups.is_empty() {
-                let new_tab_groups: Vec<NewTabGroup> = window
-                    .tab_groups
+            if !all_tab_groups.is_empty() {
+                let new_tab_groups: Vec<NewTabGroup> = all_tab_groups
                     .iter()
                     .map(|group| NewTabGroup {
                         window_id,
@@ -1034,15 +1051,55 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
                     .select(schema::tab_groups::columns::id)
                     .order(schema::tab_groups::columns::id.asc())
                     .load(conn)?;
-                for (group, row_id) in window.tab_groups.iter().zip(inserted_ids.iter()) {
+                for (group, row_id) in all_tab_groups.iter().zip(inserted_ids.iter()) {
                     tab_group_row_ids.insert(group.id, *row_id);
                 }
             }
 
-            let tabs: Vec<NewTab> = window
+            if let Some(projects) = &window.projects {
+                let new_window_projects: Vec<NewWindowProject> =
+                    std::iter::once(NewWindowProject {
+                        window_id,
+                        path: projects.active.root.to_string_lossy().into_owned(),
+                        name: projects.active.name.clone(),
+                        active_tab_index,
+                        is_active: true,
+                        is_previous: false,
+                    })
+                    .chain(hidden_projects.iter().map(|project| NewWindowProject {
+                        window_id,
+                        path: project.root.to_string_lossy().into_owned(),
+                        name: project.name.clone(),
+                        active_tab_index: project.active_tab_index.try_into().unwrap_or(0),
+                        is_active: false,
+                        is_previous: projects.previous.as_ref() == Some(&project.root),
+                    }))
+                    .collect();
+                diesel::insert_into(schema::window_projects::dsl::window_projects)
+                    .values(new_window_projects)
+                    .execute(conn)?;
+            }
+
+            let active_project_path = window
+                .projects
+                .as_ref()
+                .map(|projects| projects.active.root.to_string_lossy().into_owned());
+            let all_tabs: Vec<(Option<String>, &TabSnapshot)> = window
                 .tabs
                 .iter()
-                .map(|tab| NewTab {
+                .map(|tab| (active_project_path.clone(), tab))
+                .chain(hidden_projects.iter().flat_map(|project| {
+                    let path = project.root.to_string_lossy().into_owned();
+                    project
+                        .tabs
+                        .iter()
+                        .map(move |tab| (Some(path.clone()), tab))
+                }))
+                .collect();
+
+            let tabs: Vec<NewTab> = all_tabs
+                .iter()
+                .map(|(project_path, tab)| NewTab {
                     window_id,
                     custom_title: tab.custom_title.clone(),
                     // We only persist and restore the selected color here
@@ -1056,6 +1113,7 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
                         .group_id
                         .and_then(|group_id| tab_group_row_ids.get(&group_id).copied()),
                     pinned: tab.pinned,
+                    project_path: project_path.clone(),
                 })
                 .collect();
 
@@ -1072,7 +1130,7 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
 
             // Since we retrieved the tab ids in descending order, we need to reverse them when we
             // iterate to restore the correct order.
-            for (tab_id, tab) in tab_ids.iter().rev().zip(window.tabs.iter()) {
+            for (tab_id, (_, tab)) in tab_ids.iter().rev().zip(all_tabs.iter()) {
                 let mut pane_nodes = VecDeque::new();
                 pane_nodes.push_back(SaveAppStateNodeTraversal {
                     node: &tab.root,
@@ -2484,6 +2542,73 @@ fn box_persisted_generic_string_object(
 /// happen is the user won't have session restoration.
 ///
 /// In the future, the awkwardness of the transaction interface is resolved in diesel 2.0.0.
+fn split_window_projects(
+    tabs: Vec<(Option<String>, TabSnapshot)>,
+    tab_groups: Vec<TabGroupSnapshot>,
+    mut project_rows: Vec<WindowProject>,
+) -> (
+    Vec<TabSnapshot>,
+    Vec<TabGroupSnapshot>,
+    Option<WindowProjectsSnapshot>,
+) {
+    let active_row_index = project_rows
+        .iter()
+        .position(|row| row.is_active)
+        .filter(|_| FeatureFlag::ProjectSessions.is_enabled());
+    let Some(active_row_index) = active_row_index else {
+        return (
+            tabs.into_iter().map(|(_, tab)| tab).collect(),
+            tab_groups,
+            None,
+        );
+    };
+    let active_row = project_rows.remove(active_row_index);
+    project_rows.retain(|row| row.path != active_row.path);
+
+    let mut visible_tabs = Vec::new();
+    let mut hidden_tabs: HashMap<String, Vec<TabSnapshot>> = HashMap::new();
+    for (project_path, tab) in tabs {
+        match project_path.filter(|path| project_rows.iter().any(|row| row.path == *path)) {
+            Some(path) => hidden_tabs.entry(path).or_default().push(tab),
+            None => visible_tabs.push(tab),
+        }
+    }
+
+    let mut remaining_groups = tab_groups;
+    let previous = project_rows
+        .iter()
+        .find(|row| row.is_previous)
+        .map(|row| PathBuf::from(&row.path));
+    let hidden = project_rows
+        .into_iter()
+        .map(|row| {
+            let tabs = hidden_tabs.remove(&row.path).unwrap_or_default();
+            let group_ids: HashSet<TabGroupId> =
+                tabs.iter().filter_map(|tab| tab.group_id).collect();
+            let tab_groups = remaining_groups
+                .extract_if(.., |group| group_ids.contains(&group.id))
+                .collect();
+            ProjectSnapshot {
+                root: PathBuf::from(row.path),
+                name: row.name,
+                tabs,
+                tab_groups,
+                active_tab_index: row.active_tab_index.try_into().unwrap_or(0),
+            }
+        })
+        .collect();
+
+    let projects = WindowProjectsSnapshot {
+        active: ProjectRef {
+            root: PathBuf::from(active_row.path),
+            name: active_row.name,
+        },
+        previous,
+        hidden,
+    };
+    (visible_tabs, remaining_groups, Some(projects))
+}
+
 fn read_sqlite_data(
     conn: &mut SqliteConnection,
     current_user_id: Option<UserUid>,
@@ -2544,13 +2669,22 @@ fn read_sqlite_data(
             .load::<TabGroup>(conn)?
             .grouped_by(&db_windows);
 
+        let db_window_projects = WindowProject::belonging_to(&db_windows)
+            .order_by(schema::window_projects::columns::id.asc())
+            .load::<WindowProject>(conn)?
+            .grouped_by(&db_windows);
+
         let saved_windows: Vec<_> = db_windows
             .into_iter()
             .enumerate()
             .zip(db_tabs)
             .zip(db_tab_groups)
+            .zip(db_window_projects)
             .map(
-                |(((idx, window), tabs_for_window), tab_groups_for_window)| {
+                |(
+                    (((idx, window), tabs_for_window), tab_groups_for_window),
+                    projects_for_window,
+                )| {
                     // Mint a fresh `TabGroupId` per row and build a `row id -> TabGroupId`
                     // map so tabs can be reattached to their group below.
                     let mut tab_group_id_by_row_id: HashMap<i32, TabGroupId> = HashMap::new();
@@ -2588,7 +2722,7 @@ fn read_sqlite_data(
                             let group_id = tab
                                 .tab_group_id
                                 .and_then(|row_id| tab_group_id_by_row_id.get(&row_id).copied());
-                            Some(TabSnapshot {
+                            let tab_snapshot = TabSnapshot {
                                 root,
                                 custom_title: tab.custom_title,
                                 default_directory_color: None,
@@ -2610,9 +2744,15 @@ fn read_sqlite_data(
                                 right_panel,
                                 group_id,
                                 pinned: tab.pinned,
-                            })
+                            };
+                            Some((tab.project_path, tab_snapshot))
                         })
                         .collect();
+                    let (saved_tabs, tab_groups_snapshots, projects) = split_window_projects(
+                        saved_tabs,
+                        tab_groups_snapshots,
+                        projects_for_window,
+                    );
 
                     if active_window_id
                         .map(|window_id| window.id == window_id)
@@ -2705,6 +2845,7 @@ fn read_sqlite_data(
                             .agent_management_filters
                             .and_then(|s| serde_json::from_str(&s).ok()),
                         tab_groups: tab_groups_snapshots,
+                        projects,
                     }
                 },
             )

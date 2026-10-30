@@ -374,6 +374,7 @@ diesel::table! {
         color -> Nullable<Text>,
         tab_group_id -> Nullable<Integer>,
         pinned -> Bool,
+        project_path -> Nullable<Text>,
     }
 }
 
@@ -435,6 +436,18 @@ diesel::table! {
     users (id) {
         id -> Integer,
         firebase_uid -> Text,
+    }
+}
+
+diesel::table! {
+    window_projects (id) {
+        id -> Integer,
+        window_id -> Integer,
+        path -> Text,
+        name -> Text,
+        active_tab_index -> Integer,
+        is_active -> Bool,
+        is_previous -> Bool,
     }
 }
 
@@ -524,6 +537,7 @@ diesel::joinable!(tabs -> tab_groups (tab_group_id));
 diesel::joinable!(tabs -> windows (window_id));
 diesel::joinable!(team_members -> teams (team_id));
 diesel::joinable!(team_settings -> teams (team_id));
+diesel::joinable!(window_projects -> windows (window_id));
 diesel::joinable!(workspace_language_server -> workspace_metadata (workspace_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -535,6 +549,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     panels,
     tab_groups,
     tabs,
+    window_projects,
     windows,
 );
 diesel::allow_tables_to_appear_in_same_query!(code_pane_tabs, code_panes,);

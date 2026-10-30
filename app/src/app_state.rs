@@ -23,6 +23,7 @@ use crate::themes::theme::AnsiColorIdentifier;
 use crate::workspace::WorkspaceRegistry;
 use crate::workspace::tab_group::TabGroupId;
 use crate::workspace::view::left_panel::ToolPanelView;
+use crate::workspace::view::projects::ProjectRef;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
@@ -61,6 +62,23 @@ pub struct WindowSnapshot {
     /// Tab groups defined in this window. Group order is implicit from
     /// member tabs' positions, so no explicit ordering is persisted.
     pub tab_groups: Vec<TabGroupSnapshot>,
+    pub projects: Option<WindowProjectsSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectSnapshot {
+    pub root: PathBuf,
+    pub name: String,
+    pub tabs: Vec<TabSnapshot>,
+    pub tab_groups: Vec<TabGroupSnapshot>,
+    pub active_tab_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowProjectsSnapshot {
+    pub active: ProjectRef,
+    pub previous: Option<PathBuf>,
+    pub hidden: Vec<ProjectSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

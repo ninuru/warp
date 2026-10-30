@@ -3,9 +3,13 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use warpui::{AppContext, EntityId, SingletonEntity, ViewContext, ViewHandle};
+use warpui::{AppContext, EntityId, SingletonEntity, ViewContext, ViewHandle, WindowId};
 
-use super::Workspace;
+use super::{Workspace, is_read_only_tab_snapshot, tab_group_snapshots, tab_groups_from_snapshots};
+use crate::ai::blocklist::SerializedBlockListItem;
+use crate::app_state::{
+    PaneUuid, ProjectSnapshot, TabGroupSnapshot, TabSnapshot, WindowProjectsSnapshot,
+};
 use crate::features::FeatureFlag;
 use crate::pane_group::{Event, NewTerminalOptions, PaneGroup, PanesLayout};
 use crate::tab::TabData;
@@ -16,7 +20,7 @@ use crate::workspace::sync_inputs::SyncedInputState;
 use crate::workspace::tab_group::{TabGroup, TabGroupId};
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ProjectRef {
+pub struct ProjectRef {
     pub root: PathBuf,
     pub name: String,
 }
@@ -32,6 +36,12 @@ pub(crate) enum ProjectTabs {
         active_tab_index: usize,
         tab_mru_order: Vec<EntityId>,
         tab_groups: HashMap<TabGroupId, TabGroup>,
+    },
+    Pending {
+        tabs: Vec<TabSnapshot>,
+        tab_groups: Vec<TabGroupSnapshot>,
+        active_tab_index: usize,
+        block_lists: Arc<HashMap<PaneUuid, Vec<SerializedBlockListItem>>>,
     },
 }
 
@@ -59,12 +69,14 @@ impl ProjectSession {
     pub fn live_tabs(&self) -> impl Iterator<Item = &TabData> {
         match &self.tabs {
             ProjectTabs::Live { tabs, .. } => tabs.iter(),
+            ProjectTabs::Pending { .. } => Default::default(),
         }
     }
 
     fn live_tabs_mut(&mut self) -> impl Iterator<Item = &mut TabData> {
         match &mut self.tabs {
             ProjectTabs::Live { tabs, .. } => tabs.iter_mut(),
+            ProjectTabs::Pending { .. } => Default::default(),
         }
     }
 }
@@ -193,7 +205,9 @@ impl Workspace {
         let Some(project_index) = self.hidden_project_index(&outgoing_root) else {
             return true;
         };
-        let tab = self.take_hidden_tab(project_index, 0);
+        let Some(tab) = self.take_hidden_tab(project_index, 0) else {
+            return true;
+        };
         if detach_panes_for_close && !re_adopted {
             self.detach_pane_group_for_close(&tab.pane_group, ctx);
         }
@@ -217,8 +231,9 @@ impl Workspace {
         };
         match event {
             Event::Exited { .. } => {
-                let tab = self.take_hidden_tab(project_index, tab_index);
-                self.detach_pane_group_for_close(&tab.pane_group, ctx);
+                if let Some(tab) = self.take_hidden_tab(project_index, tab_index) {
+                    self.detach_pane_group_for_close(&tab.pane_group, ctx);
+                }
                 ctx.dispatch_global_action("workspace:save_app", ());
                 ctx.notify();
             }
@@ -361,7 +376,7 @@ impl Workspace {
             })
     }
 
-    fn take_hidden_tab(&mut self, project_index: usize, tab_index: usize) -> TabData {
+    fn take_hidden_tab(&mut self, project_index: usize, tab_index: usize) -> Option<TabData> {
         let (tab, is_empty) = match &mut self.hidden_projects[project_index].tabs {
             ProjectTabs::Live {
                 tabs,
@@ -384,6 +399,7 @@ impl Workspace {
                 }
                 (tab, tabs.is_empty())
             }
+            ProjectTabs::Pending { .. } => return None,
         };
         if is_empty {
             let session = self.hidden_projects.remove(project_index);
@@ -391,7 +407,86 @@ impl Workspace {
                 self.previous_project = None;
             }
         }
-        tab
+        Some(tab)
+    }
+
+    pub(super) fn projects_snapshot(
+        &self,
+        window_id: WindowId,
+        app: &AppContext,
+    ) -> WindowProjectsSnapshot {
+        let hidden = self
+            .hidden_projects
+            .iter()
+            .map(|session| match &session.tabs {
+                ProjectTabs::Live {
+                    tabs,
+                    active_tab_index,
+                    tab_groups,
+                    ..
+                } => {
+                    let tabs: Vec<TabSnapshot> = tabs
+                        .iter()
+                        .map(|tab| self.tab_snapshot(tab, window_id, app))
+                        .filter(|tab| !is_read_only_tab_snapshot(tab))
+                        .collect();
+                    ProjectSnapshot {
+                        root: session.project.root.clone(),
+                        name: session.project.name.clone(),
+                        tab_groups: tab_group_snapshots(&tabs, tab_groups),
+                        tabs,
+                        active_tab_index: *active_tab_index,
+                    }
+                }
+                ProjectTabs::Pending {
+                    tabs,
+                    tab_groups,
+                    active_tab_index,
+                    ..
+                } => ProjectSnapshot {
+                    root: session.project.root.clone(),
+                    name: session.project.name.clone(),
+                    tabs: tabs.clone(),
+                    tab_groups: tab_groups.clone(),
+                    active_tab_index: *active_tab_index,
+                },
+            })
+            .collect();
+        WindowProjectsSnapshot {
+            active: self.active_project.clone(),
+            previous: self.previous_project.clone(),
+            hidden,
+        }
+    }
+
+    pub(super) fn restore_projects(
+        &mut self,
+        projects: WindowProjectsSnapshot,
+        block_lists: Arc<HashMap<PaneUuid, Vec<SerializedBlockListItem>>>,
+    ) {
+        let WindowProjectsSnapshot {
+            active,
+            previous,
+            hidden,
+        } = projects;
+        self.hidden_projects = hidden
+            .into_iter()
+            .filter(|project| project.root != active.root)
+            .map(|project| ProjectSession {
+                project: ProjectRef {
+                    root: project.root,
+                    name: project.name,
+                },
+                tabs: ProjectTabs::Pending {
+                    tabs: project.tabs,
+                    tab_groups: project.tab_groups,
+                    active_tab_index: project.active_tab_index,
+                    block_lists: block_lists.clone(),
+                },
+            })
+            .collect();
+        self.previous_project = previous;
+        self.active_project = active;
     }
 
     fn take_live_project(&mut self) -> ProjectSession {
@@ -428,7 +523,21 @@ impl Workspace {
                 self.tab_groups = tab_groups;
                 self.activate_tab_internal(active_tab_index, ctx);
             }
-            Some(ProjectTabs::Live { .. }) | None => {
+            Some(ProjectTabs::Pending {
+                tabs,
+                tab_groups,
+                active_tab_index,
+                block_lists,
+            }) if !tabs.is_empty() => {
+                if FeatureFlag::GroupedTabs.is_enabled() {
+                    self.tab_groups = tab_groups_from_snapshots(&tab_groups);
+                }
+                for saved_tab in &tabs {
+                    self.restore_tab_from_snapshot(saved_tab, block_lists.clone(), ctx);
+                }
+                self.activate_tab_internal(active_tab_index, ctx);
+            }
+            Some(ProjectTabs::Live { .. }) | Some(ProjectTabs::Pending { .. }) | None => {
                 self.add_tab_with_pane_layout(
                     PanesLayout::SingleTerminal(Box::new(NewTerminalOptions {
                         initial_directory: Some(root),

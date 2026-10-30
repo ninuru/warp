@@ -17,7 +17,7 @@ pub(crate) mod onboarding;
 pub(crate) mod openwarp_launch_modal;
 pub(crate) mod orchestration_launch_modal;
 mod prefix_indicator;
-mod projects;
+pub(crate) mod projects;
 pub(crate) mod right_panel;
 mod startup_directory;
 mod tab_grouping;
@@ -4113,67 +4113,18 @@ impl Workspace {
                 // Restore groups first so per-tab `group_id` assignments
                 // below can validate membership against a populated map.
                 if FeatureFlag::GroupedTabs.is_enabled() {
-                    self.tab_groups = window_snapshot
-                        .tab_groups
-                        .iter()
-                        .map(|group_snapshot| {
-                            (
-                                group_snapshot.id,
-                                TabGroup {
-                                    id: group_snapshot.id,
-                                    name: group_snapshot.name.clone(),
-                                    color: group_snapshot.color,
-                                    collapsed: group_snapshot.collapsed,
-                                    draggable_state: Default::default(),
-                                    // Only restore pinned state when the
-                                    // Pinned Tabs feature is enabled.
-                                    pinned: FeatureFlag::PinnedTabs.is_enabled()
-                                        && group_snapshot.pinned,
-                                },
-                            )
-                        })
-                        .collect();
+                    self.tab_groups = tab_groups_from_snapshots(&window_snapshot.tab_groups);
                 }
 
-                window_snapshot
-                    .tabs
-                    .iter()
-                    .enumerate()
-                    .for_each(|(tab_index, saved_tab)| {
-                        let custom_title = saved_tab.custom_title.clone();
-                        self.add_tab_with_pane_layout(
-                            PanesLayout::Snapshot(Box::new(saved_tab.root.clone())),
-                            block_lists.clone(),
-                            custom_title,
-                            ctx,
-                        );
-                        self.tabs[tab_index].default_directory_color =
-                            saved_tab.default_directory_color;
-                        self.tabs[tab_index].selected_color = saved_tab.selected_color;
-                        // Only restore pinned state when the Pinned Tabs
-                        // feature is enabled.
-                        if FeatureFlag::PinnedTabs.is_enabled() {
-                            self.tabs[tab_index].pinned = saved_tab.pinned;
-                        }
-                        // Drop the group reference if the group itself didn't restore.
-                        self.tabs[tab_index].group_id = saved_tab
-                            .group_id
-                            .filter(|group_id| self.tab_groups.contains_key(group_id));
+                for saved_tab in &window_snapshot.tabs {
+                    self.restore_tab_from_snapshot(saved_tab, block_lists.clone(), ctx);
+                }
 
-                        let pane_group = self.tabs[tab_index].pane_group.clone();
-
-                        if let Some(left_panel_snapshot) = &saved_tab.left_panel {
-                            self.restore_left_panel_for_tab(&pane_group, left_panel_snapshot, ctx);
-                        }
-
-                        if let Some(right_panel_snapshot) = &saved_tab.right_panel {
-                            self.restore_right_panel_for_tab(
-                                &pane_group,
-                                right_panel_snapshot,
-                                ctx,
-                            );
-                        }
-                    });
+                if FeatureFlag::ProjectSessions.is_enabled()
+                    && let Some(projects) = window_snapshot.projects
+                {
+                    self.restore_projects(projects, block_lists);
+                }
 
                 if self.tab_count() == 0 {
                     if self.should_trigger_get_started_onboarding(ctx) {
@@ -4375,6 +4326,43 @@ impl Workspace {
                 // the tabs panel closed even though native windows still expose workspace chrome.
                 false
             }
+        }
+    }
+
+    fn restore_tab_from_snapshot(
+        &mut self,
+        saved_tab: &TabSnapshot,
+        block_lists: Arc<HashMap<PaneUuid, Vec<SerializedBlockListItem>>>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let tab_index = self.tabs.len();
+        let custom_title = saved_tab.custom_title.clone();
+        self.add_tab_with_pane_layout(
+            PanesLayout::Snapshot(Box::new(saved_tab.root.clone())),
+            block_lists,
+            custom_title,
+            ctx,
+        );
+        self.tabs[tab_index].default_directory_color = saved_tab.default_directory_color;
+        self.tabs[tab_index].selected_color = saved_tab.selected_color;
+        // Only restore pinned state when the Pinned Tabs
+        // feature is enabled.
+        if FeatureFlag::PinnedTabs.is_enabled() {
+            self.tabs[tab_index].pinned = saved_tab.pinned;
+        }
+        // Drop the group reference if the group itself didn't restore.
+        self.tabs[tab_index].group_id = saved_tab
+            .group_id
+            .filter(|group_id| self.tab_groups.contains_key(group_id));
+
+        let pane_group = self.tabs[tab_index].pane_group.clone();
+
+        if let Some(left_panel_snapshot) = &saved_tab.left_panel {
+            self.restore_left_panel_for_tab(&pane_group, left_panel_snapshot, ctx);
+        }
+
+        if let Some(right_panel_snapshot) = &saved_tab.right_panel {
+            self.restore_right_panel_for_tab(&pane_group, right_panel_snapshot, ctx);
         }
     }
 
@@ -11925,92 +11913,18 @@ impl Workspace {
             None
         };
         let tabs: Vec<TabSnapshot> = self
-            .visible_tab_views()
+            .tabs
+            .iter()
             .enumerate()
             .filter(|(tab_index, _)| Some(*tab_index) != transferred_tab_index)
-            .map(|(tab_index, pane_group_view)| {
-                let resizable_data = ResizableData::handle(app);
-                let modal_sizes = resizable_data.as_ref(app).get_all_handles(window_id);
-
-                let left_panel_width = modal_sizes.map(|ms| {
-                    ms.left_panel_width
-                        .lock()
-                        .expect("should be able to lock left panel handle")
-                        .size()
-                });
-
-                let right_panel_width = modal_sizes.map(|ms| {
-                    ms.right_panel_width
-                        .lock()
-                        .expect("should be able to lock right panel handle")
-                        .size()
-                });
-
-                let pane_group = pane_group_view.as_ref(app);
-                let root = pane_group.snapshot(app);
-                let left_panel =
-                    self.compute_left_panel_snapshot(pane_group_view, left_panel_width, app);
-                let right_panel =
-                    self.compute_right_panel_snapshot(pane_group_view, right_panel_width, app);
-                TabSnapshot {
-                    root,
-                    custom_title: pane_group.custom_title(app),
-                    default_directory_color: self
-                        .tabs
-                        .get(tab_index)
-                        .and_then(|tab| tab.default_directory_color),
-                    selected_color: self
-                        .tabs
-                        .get(tab_index)
-                        .map(|tab| tab.selected_color)
-                        .unwrap_or_default(),
-                    left_panel,
-                    right_panel,
-                    group_id: if FeatureFlag::GroupedTabs.is_enabled() {
-                        self.tabs.get(tab_index).and_then(|tab| tab.group_id)
-                    } else {
-                        None
-                    },
-                    // Only persist pinned state when the Pinned Tabs feature is
-                    // enabled.
-                    pinned: FeatureFlag::PinnedTabs.is_enabled()
-                        && self.tabs.get(tab_index).is_some_and(|tab| tab.pinned),
-                }
-            })
-            .filter(|tab| {
-                // Filter out any tab that contains a single, read-only session.
-                !matches!(
-                    tab.root,
-                    PaneNodeSnapshot::Leaf(LeafSnapshot {
-                        contents: LeafContents::Terminal(TerminalPaneSnapshot {
-                            is_read_only: true,
-                            ..
-                        }),
-                        ..
-                    })
-                )
-            })
+            .map(|(_, tab)| self.tab_snapshot(tab, window_id, app))
+            .filter(|tab| !is_read_only_tab_snapshot(tab))
             .collect();
 
-        // Skip orphan groups whose members were all filtered out above.
-        // This is a safety net and ensures empty groups are not saved/restored.
-        let tab_groups: Vec<TabGroupSnapshot> = if FeatureFlag::GroupedTabs.is_enabled() {
-            let referenced_group_ids: HashSet<TabGroupId> =
-                tabs.iter().filter_map(|tab| tab.group_id).collect();
-            self.tab_groups
-                .values()
-                .filter(|group| referenced_group_ids.contains(&group.id))
-                .map(|group| TabGroupSnapshot {
-                    id: group.id,
-                    name: group.name.clone(),
-                    color: group.color,
-                    collapsed: group.collapsed,
-                    pinned: FeatureFlag::PinnedTabs.is_enabled() && group.pinned,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let tab_groups = tab_group_snapshots(&tabs, &self.tab_groups);
+        let projects = FeatureFlag::ProjectSessions
+            .is_enabled()
+            .then(|| self.projects_snapshot(window_id, app));
 
         let resizable_data = ResizableData::handle(app);
         let modal_sizes = resizable_data.as_ref(app).get_all_handles(window_id);
@@ -12080,6 +11994,49 @@ impl Workspace {
             right_panel_width,
             agent_management_filters,
             tab_groups,
+            projects,
+        }
+    }
+
+    fn tab_snapshot(&self, tab: &TabData, window_id: WindowId, app: &AppContext) -> TabSnapshot {
+        let resizable_data = ResizableData::handle(app);
+        let modal_sizes = resizable_data.as_ref(app).get_all_handles(window_id);
+
+        let left_panel_width = modal_sizes.map(|ms| {
+            ms.left_panel_width
+                .lock()
+                .expect("should be able to lock left panel handle")
+                .size()
+        });
+
+        let right_panel_width = modal_sizes.map(|ms| {
+            ms.right_panel_width
+                .lock()
+                .expect("should be able to lock right panel handle")
+                .size()
+        });
+
+        let pane_group_view = &tab.pane_group;
+        let pane_group = pane_group_view.as_ref(app);
+        let root = pane_group.snapshot(app);
+        let left_panel = self.compute_left_panel_snapshot(pane_group_view, left_panel_width, app);
+        let right_panel =
+            self.compute_right_panel_snapshot(pane_group_view, right_panel_width, app);
+        TabSnapshot {
+            root,
+            custom_title: pane_group.custom_title(app),
+            default_directory_color: tab.default_directory_color,
+            selected_color: tab.selected_color,
+            left_panel,
+            right_panel,
+            group_id: if FeatureFlag::GroupedTabs.is_enabled() {
+                tab.group_id
+            } else {
+                None
+            },
+            // Only persist pinned state when the Pinned Tabs feature is
+            // enabled.
+            pinned: FeatureFlag::PinnedTabs.is_enabled() && tab.pinned,
         }
     }
 
@@ -29868,6 +29825,65 @@ pub(super) fn group_has_single_member(tabs: &[TabData], group_id: TabGroupId) ->
 /// `FeatureFlag::VerticalTabs` + `use_vertical_tabs` check the tab bar uses to
 /// decide what to render (see `render_tab_bar_contents`) — so the id always
 /// points at wherever the tab strip is actually shown.
+fn is_read_only_tab_snapshot(tab: &TabSnapshot) -> bool {
+    // Filter out any tab that contains a single, read-only session.
+    matches!(
+        tab.root,
+        PaneNodeSnapshot::Leaf(LeafSnapshot {
+            contents: LeafContents::Terminal(TerminalPaneSnapshot {
+                is_read_only: true,
+                ..
+            }),
+            ..
+        })
+    )
+}
+
+fn tab_group_snapshots(
+    tabs: &[TabSnapshot],
+    tab_groups: &HashMap<TabGroupId, TabGroup>,
+) -> Vec<TabGroupSnapshot> {
+    // Skip orphan groups whose members were all filtered out above.
+    // This is a safety net and ensures empty groups are not saved/restored.
+    if !FeatureFlag::GroupedTabs.is_enabled() {
+        return Vec::new();
+    }
+    let referenced_group_ids: HashSet<TabGroupId> =
+        tabs.iter().filter_map(|tab| tab.group_id).collect();
+    tab_groups
+        .values()
+        .filter(|group| referenced_group_ids.contains(&group.id))
+        .map(|group| TabGroupSnapshot {
+            id: group.id,
+            name: group.name.clone(),
+            color: group.color,
+            collapsed: group.collapsed,
+            pinned: FeatureFlag::PinnedTabs.is_enabled() && group.pinned,
+        })
+        .collect()
+}
+
+fn tab_groups_from_snapshots(tab_groups: &[TabGroupSnapshot]) -> HashMap<TabGroupId, TabGroup> {
+    tab_groups
+        .iter()
+        .map(|group_snapshot| {
+            (
+                group_snapshot.id,
+                TabGroup {
+                    id: group_snapshot.id,
+                    name: group_snapshot.name.clone(),
+                    color: group_snapshot.color,
+                    collapsed: group_snapshot.collapsed,
+                    draggable_state: Default::default(),
+                    // Only restore pinned state when the
+                    // Pinned Tabs feature is enabled.
+                    pinned: FeatureFlag::PinnedTabs.is_enabled() && group_snapshot.pinned,
+                },
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn active_tab_bar_position_id(app: &AppContext) -> &'static str {
     if uses_vertical_tabs(app) {
         VERTICAL_TABS_PANEL_POSITION_ID
