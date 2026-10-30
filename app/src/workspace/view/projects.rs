@@ -3,14 +3,16 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use warpui::{AppContext, EntityId, SingletonEntity, ViewContext};
+use warpui::{AppContext, EntityId, SingletonEntity, ViewContext, ViewHandle};
 
 use super::Workspace;
 use crate::features::FeatureFlag;
-use crate::pane_group::{NewTerminalOptions, PanesLayout};
+use crate::pane_group::{Event, NewTerminalOptions, PaneGroup, PanesLayout};
 use crate::tab::TabData;
 use crate::terminal::session_settings::{NewSessionSource, SessionSettings, WorkingDirectoryMode};
+use crate::undo_close::UndoCloseStack;
 use crate::workspace::cross_window_tab_drag::CrossWindowTabDrag;
+use crate::workspace::sync_inputs::SyncedInputState;
 use crate::workspace::tab_group::{TabGroup, TabGroupId};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +61,12 @@ impl ProjectSession {
             ProjectTabs::Live { tabs, .. } => tabs.iter(),
         }
     }
+
+    fn live_tabs_mut(&mut self) -> impl Iterator<Item = &mut TabData> {
+        match &mut self.tabs {
+            ProjectTabs::Live { tabs, .. } => tabs.iter_mut(),
+        }
+    }
 }
 
 impl Workspace {
@@ -69,25 +77,24 @@ impl Workspace {
         {
             return;
         }
-        if self.is_palette_open() {
-            self.close_palette(false, None, ctx);
+        self.activate_project(root, ctx);
+    }
+
+    pub(crate) fn switch_to_open_project(&mut self, root: PathBuf, ctx: &mut ViewContext<Self>) {
+        if self.hidden_project_index(&root).is_some() {
+            self.switch_to_project(root, ctx);
         }
-        self.reset_tab_ui_state(ctx);
+    }
 
-        let target = self
-            .hidden_projects
-            .iter()
-            .position(|session| session.project.root == root)
-            .map(|index| self.hidden_projects.remove(index));
-        let outgoing = self.take_live_project();
-        self.install_project(target, root, ctx);
-
-        self.previous_project = Some(outgoing.project.root.clone());
-        self.hidden_projects.push(outgoing);
-
-        self.update_window_title(ctx);
-        ctx.dispatch_global_action("workspace:save_app", ());
-        ctx.notify();
+    pub(crate) fn reveal_project_for_pane_group(
+        &mut self,
+        pane_group_id: EntityId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if let Some((project_index, _)) = self.hidden_tab_position(pane_group_id) {
+            let root = self.hidden_projects[project_index].project.root.clone();
+            self.switch_to_project(root, ctx);
+        }
     }
 
     #[cfg_attr(not(test), expect(dead_code))]
@@ -136,6 +143,255 @@ impl Workspace {
             && !root.as_os_str().is_empty()
             && Some(root) != dirs::home_dir().as_ref();
         applies.then(|| root.clone())
+    }
+
+    pub(super) fn closed_tab_project_root(&self) -> Option<PathBuf> {
+        FeatureFlag::ProjectSessions
+            .is_enabled()
+            .then(|| self.active_project.root.clone())
+    }
+
+    pub(super) fn is_last_tab_in_window(&self) -> bool {
+        self.tabs.len() == 1 && self.hidden_projects.is_empty()
+    }
+
+    pub(super) fn all_tabs_mut(&mut self) -> impl Iterator<Item = &mut TabData> {
+        self.tabs.iter_mut().chain(
+            self.hidden_projects
+                .iter_mut()
+                .flat_map(ProjectSession::live_tabs_mut),
+        )
+    }
+
+    pub(super) fn close_last_tab_of_project(
+        &mut self,
+        add_to_undo_stack: bool,
+        detach_panes_for_close: bool,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        if !FeatureFlag::ProjectSessions.is_enabled() {
+            return false;
+        }
+        let Some(target) = self
+            .previous_project
+            .clone()
+            .filter(|root| self.hidden_project_index(root).is_some())
+            .or_else(|| {
+                self.hidden_projects
+                    .last()
+                    .map(|session| session.project.root.clone())
+            })
+        else {
+            return false;
+        };
+        let outgoing_root = self.active_project.root.clone();
+        let re_adopted =
+            detach_panes_for_close && self.try_re_adopt_split_off_child_agent_tab(0, ctx);
+
+        self.activate_project(target, ctx);
+
+        let Some(project_index) = self.hidden_project_index(&outgoing_root) else {
+            return true;
+        };
+        let tab = self.take_hidden_tab(project_index, 0);
+        if detach_panes_for_close && !re_adopted {
+            self.detach_pane_group_for_close(&tab.pane_group, ctx);
+        }
+        if add_to_undo_stack && !re_adopted {
+            let handle = ctx.handle();
+            UndoCloseStack::handle(ctx).update(ctx, |stack, ctx| {
+                stack.handle_tab_closed(handle, 0, tab, None, ctx);
+            });
+        }
+        true
+    }
+
+    pub(super) fn consume_hidden_pane_group_event(
+        &mut self,
+        pane_group: &ViewHandle<PaneGroup>,
+        event: &Event,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        let Some((project_index, tab_index)) = self.hidden_tab_position(pane_group.id()) else {
+            return false;
+        };
+        match event {
+            Event::Exited { .. } => {
+                let tab = self.take_hidden_tab(project_index, tab_index);
+                self.detach_pane_group_for_close(&tab.pane_group, ctx);
+                ctx.dispatch_global_action("workspace:save_app", ());
+                ctx.notify();
+            }
+            Event::AppStateChanged => {
+                ctx.dispatch_global_action("workspace:save_app", ());
+                self.refresh_working_directories_for_pane_group(pane_group, ctx);
+                if FeatureFlag::DirectoryTabColors.is_enabled()
+                    && let Some(tab) = self.hidden_projects[project_index]
+                        .live_tabs_mut()
+                        .nth(tab_index)
+                {
+                    Self::sync_codebase_tab_color(tab, ctx);
+                }
+            }
+            Event::SendNotification { .. } => return false,
+            Event::TerminalViewStateChanged => ctx.notify(),
+            Event::Escape
+            | Event::LeftPanelToggled { .. }
+            | Event::ExecuteCommand { .. }
+            | Event::PaneTitleUpdated
+            | Event::OpenSettings { .. }
+            | Event::OpenAutoReloadModal { .. }
+            | Event::AskAIAssistant { .. }
+            | Event::SyncInput { .. }
+            | Event::ShowCommandSearch { .. }
+            | Event::OnboardingTutorialCompleted
+            | Event::OpenWorkflowModalWithCommand { .. }
+            | Event::OpenCloudWorkflowForEdit { .. }
+            | Event::OpenDriveObjectShareDialog { .. }
+            | Event::OpenWorkflowModalWithTemporary { .. }
+            | Event::OpenPromptEditor
+            | Event::OpenAgentToolbarEditor
+            | Event::OpenCLIAgentToolbarEditor
+            | Event::OpenFileInWarp { .. }
+            | Event::OpenWarpDriveLink { .. }
+            | Event::OpenCodeDiff { .. }
+            | Event::OpenCodeReviewPane { .. }
+            | Event::ToggleCodeReviewPane { .. }
+            | Event::RunWorkflow { .. }
+            | Event::InvokeEnvVarCollection { .. }
+            | Event::CloseSharedSessionPaneRequested { .. }
+            | Event::MaximizePaneToggled
+            | Event::RemoteRepoNavigated { .. }
+            | Event::ActiveSessionChanged
+            | Event::FocusPaneGroup
+            | Event::FocusPane { .. }
+            | Event::FocusPaneInWorkspace { .. }
+            | Event::ViewInWarpDrive { .. }
+            | Event::MoveToSpace { .. }
+            | Event::PaneFocused
+            | Event::DroppedOnTabBar { .. }
+            | Event::SwitchTabFocusAndMovePane { .. }
+            | Event::UpdateHoveredTabIndex { .. }
+            | Event::ClearHoveredTabIndex
+            | Event::OpenWarpDriveObjectInPane { .. }
+            | Event::OpenChildAgentInNewTab { .. }
+            | Event::OpenSuggestedAgentModeWorkflowModal { .. }
+            | Event::OpenSuggestedRuleModal { .. }
+            | Event::OpenAIFactCollection { .. }
+            | Event::AnonymousUserSignup
+            | Event::OpenPalette { .. }
+            | Event::FileUploadCommand { .. }
+            | Event::FileUploadPasswordPending { .. }
+            | Event::FileUploadFinished { .. }
+            | Event::OpenFileUploadSession { .. }
+            | Event::TerminateFileUploadSession { .. }
+            | Event::ShowToast { .. }
+            | Event::SignupAnonymousUser { .. }
+            | Event::OpenThemeChooser
+            | Event::InvalidatedActiveConversation
+            | Event::OpenConversationHistory
+            | Event::OpenMCPSettingsPage { .. }
+            | Event::OpenAddPromptPane { .. }
+            | Event::OpenAddRulePane
+            | Event::OpenEnvironmentManagementPane
+            | Event::OpenFilesPalette { .. }
+            | Event::ToggleLeftPanel { .. }
+            | Event::OpenAgentProfileEditor { .. }
+            | Event::RepoChanged
+            | Event::AttachPathAsContext { .. }
+            | Event::AttachPlanAsContext { .. }
+            | Event::CDToDirectory { .. }
+            | Event::OpenDirectoryInNewTab { .. }
+            | Event::InsertCodeReviewComments { .. }
+            | Event::OpenCodeReviewPaneAndScrollToComment { .. }
+            | Event::ImportAllCodeReviewComments { .. }
+            | Event::RunTabConfigSkill { .. }
+            | Event::OpenLspLogs { .. }
+            | Event::ShowCloudAgentCapacityModal { .. } => log_ignored_hidden_event(pane_group),
+            #[cfg(feature = "local_fs")]
+            Event::OpenCodeInWarp { .. }
+            | Event::PreviewCodeInWarp { .. }
+            | Event::OpenFileWithTarget { .. }
+            | Event::FileRenamed { .. }
+            | Event::FileDeleted { .. } => log_ignored_hidden_event(pane_group),
+            #[cfg(not(target_family = "wasm"))]
+            Event::OpenPluginInstructionsPane { .. } => log_ignored_hidden_event(pane_group),
+        }
+        true
+    }
+
+    fn activate_project(&mut self, root: PathBuf, ctx: &mut ViewContext<Self>) {
+        if self.is_palette_open() {
+            self.close_palette(false, None, ctx);
+        }
+        self.reset_tab_ui_state(ctx);
+
+        let target = self
+            .hidden_project_index(&root)
+            .map(|index| self.hidden_projects.remove(index));
+        let outgoing = self.take_live_project();
+        self.install_project(target, root, ctx);
+
+        self.previous_project = Some(outgoing.project.root.clone());
+        self.hidden_projects.push(outgoing);
+
+        if SyncedInputState::as_ref(ctx).is_syncing_any_inputs(ctx.window_id()) {
+            self.process_updated_sync_state(ctx);
+        }
+        self.update_window_title(ctx);
+        ctx.dispatch_global_action("workspace:save_app", ());
+        ctx.notify();
+    }
+
+    fn hidden_project_index(&self, root: &Path) -> Option<usize> {
+        self.hidden_projects
+            .iter()
+            .position(|session| session.project.root == root)
+    }
+
+    fn hidden_tab_position(&self, pane_group_id: EntityId) -> Option<(usize, usize)> {
+        self.hidden_projects
+            .iter()
+            .enumerate()
+            .find_map(|(project_index, session)| {
+                session
+                    .live_tabs()
+                    .position(|tab| tab.pane_group.id() == pane_group_id)
+                    .map(|tab_index| (project_index, tab_index))
+            })
+    }
+
+    fn take_hidden_tab(&mut self, project_index: usize, tab_index: usize) -> TabData {
+        let (tab, is_empty) = match &mut self.hidden_projects[project_index].tabs {
+            ProjectTabs::Live {
+                tabs,
+                active_tab_index,
+                tab_mru_order,
+                tab_groups,
+            } => {
+                let tab = tabs.remove(tab_index);
+                let pane_group_id = tab.pane_group.id();
+                tab_mru_order.retain(|id| *id != pane_group_id);
+                if let Some(group_id) = tab.group_id
+                    && !tabs.iter().any(|other| other.group_id == Some(group_id))
+                {
+                    tab_groups.remove(&group_id);
+                }
+                if tab_index < *active_tab_index {
+                    *active_tab_index -= 1;
+                } else {
+                    *active_tab_index = (*active_tab_index).min(tabs.len().saturating_sub(1));
+                }
+                (tab, tabs.is_empty())
+            }
+        };
+        if is_empty {
+            let session = self.hidden_projects.remove(project_index);
+            if self.previous_project.as_ref() == Some(&session.project.root) {
+                self.previous_project = None;
+            }
+        }
+        tab
     }
 
     fn take_live_project(&mut self) -> ProjectSession {
@@ -203,6 +459,15 @@ impl Workspace {
     }
 }
 
+fn log_ignored_hidden_event(pane_group: &ViewHandle<PaneGroup>) {
+    let pane_group_id = pane_group.id();
+    log::debug!("Ignoring event from hidden pane group {pane_group_id:?}");
+}
+
 #[cfg(test)]
 #[path = "projects_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "projects_events_tests.rs"]
+mod events_tests;

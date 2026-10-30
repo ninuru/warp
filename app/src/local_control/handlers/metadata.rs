@@ -835,7 +835,7 @@ pub(super) fn tab_entries_for_windows(
         };
         entries.extend(workspace.read(ctx, |workspace, _| {
             workspace
-                .tab_views()
+                .visible_tab_views()
                 .enumerate()
                 .map(|(index, pane_group)| TabEntry {
                     window_id: window.window_id,
