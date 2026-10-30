@@ -11,7 +11,6 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("h", "pane_group:navigate_left"),
     ("j", "pane_group:navigate_down"),
     ("k", "pane_group:navigate_up"),
-    ("l", "pane_group:navigate_right"),
     ("%", "pane_group:add_right"),
     ("\"", "pane_group:add_down"),
     ("c", "workspace:new_tab"),
@@ -28,6 +27,11 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("9", "workspace:activate_last_tab"),
     ("^", "workspace:activate_last_active_tab"),
     (",", "workspace:rename_active_tab"),
+    ("f", "workspace:open_project_picker"),
+    ("l", "workspace:switch_to_previous_project"),
+    ("s", "workspace:list_open_projects"),
+    ("$", "workspace:rename_project"),
+    ("[", "terminal:select_previous_block"),
 ];
 const DEFAULT_ROOT_BINDINGS: &[(&str, &str)] = &[
     ("alt-1", "workspace:activate_first_tab"),

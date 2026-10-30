@@ -929,6 +929,20 @@ fn parse_open_file_editor_url(url: &Url) -> Result<(PathBuf, Option<LineAndColum
     ))
 }
 
+fn parse_switch_project_url(url: &Url) -> Result<PathBuf> {
+    let path =
+        parse_tab_path(url).ok_or_else(|| anyhow!("missing path for switch_project action"))?;
+    ensure!(
+        path.is_absolute(),
+        "`path` must be absolute for switch_project action"
+    );
+    ensure!(
+        path.is_dir(),
+        "`path` must be an existing directory for switch_project action"
+    );
+    Ok(path)
+}
+
 fn parse_auto_handoff_trigger(url: &Url) -> AutoCloudHandoffTrigger {
     match url
         .query_pairs()
@@ -952,6 +966,9 @@ enum Action {
     },
     Docker,
     OpenRepo,
+    SwitchProject {
+        path: PathBuf,
+    },
     CloudAgentSetup,
     NewCloudAgentConversation,
     NewAgentConversation,
@@ -975,6 +992,9 @@ impl Action {
             }
             "/docker/open_subshell" => Ok(Self::Docker),
             "/open-repo" => Ok(Self::OpenRepo),
+            "/switch_project" => Ok(Self::SwitchProject {
+                path: parse_switch_project_url(url)?,
+            }),
             "/cloud_agent_setup" => Ok(Self::CloudAgentSetup),
             "/new_cloud_agent_conversation" => Ok(Self::NewCloudAgentConversation),
             "/new_agent_conversation" => Ok(Self::NewAgentConversation),
@@ -1062,6 +1082,31 @@ impl Action {
                         log::warn!("no workspace views in window {window_id} for open repo action");
                     }
                 }
+            }
+            Action::SwitchProject { path } => {
+                if !FeatureFlag::ProjectSessions.is_enabled() {
+                    log::warn!("switch_project action requires project sessions");
+                    return;
+                }
+                let window_id =
+                    primary_window_id.or_else(|| Some(open_new_window_get_handles(None, ctx).0));
+
+                let Some(window_id) = window_id else {
+                    log::warn!("unable to determine window for switch project action");
+                    return;
+                };
+
+                let Some(workspace) = WorkspaceRegistry::as_ref(ctx).get(window_id, ctx) else {
+                    log::warn!(
+                        "no workspace found in window {window_id} for switch project action"
+                    );
+                    return;
+                };
+
+                workspace.update(ctx, |workspace, ctx| {
+                    workspace
+                        .handle_action(&WorkspaceAction::SwitchProject { path: path.clone() }, ctx);
+                });
             }
             Action::CloudAgentSetup => {
                 let window_id =
@@ -1232,6 +1277,7 @@ impl Action {
             | Self::OpenFileEditor { .. }
             | Self::CreateEnvironment { .. }
             | Self::OpenRepo
+            | Self::SwitchProject { .. }
             | Self::CloudAgentSetup
             | Self::NewCloudAgentConversation
             | Self::NewAgentConversation

@@ -16,8 +16,8 @@ use super::schema::{
     mcp_server_installations, mcp_server_panes, notebook_panes, notebooks, object_actions,
     object_metadata, object_permissions, pane_branches, pane_leaves, pane_nodes, panels,
     project_rules, projects, server_experiments, settings_panes, tab_groups, tabs, team_members,
-    team_settings, teams, terminal_panes, user_profiles, windows, workflow_panes, workflows,
-    workspace_language_server, workspace_metadata, workspace_teams, workspaces,
+    team_settings, teams, terminal_panes, user_profiles, window_projects, windows, workflow_panes,
+    workflows, workspace_language_server, workspace_metadata, workspace_teams, workspaces,
 };
 
 #[derive(Insertable)]
@@ -359,6 +359,7 @@ pub struct Tab {
     pub color: Option<String>,
     pub tab_group_id: Option<i32>,
     pub pinned: bool,
+    pub project_path: Option<String>,
 }
 
 #[derive(Insertable)]
@@ -369,6 +370,7 @@ pub struct NewTab {
     pub color: Option<String>,
     pub tab_group_id: Option<i32>,
     pub pinned: bool,
+    pub project_path: Option<String>,
 }
 
 /// Persisted form of a tab group. `name` is optional — untitled groups omit
@@ -393,6 +395,30 @@ pub struct NewTabGroup {
     pub color: Option<String>,
     pub collapsed: bool,
     pub pinned: bool,
+}
+
+#[derive(Identifiable, Queryable, Associations)]
+#[diesel(belongs_to(Window))]
+#[diesel(table_name = window_projects)]
+pub struct WindowProject {
+    pub id: i32,
+    pub window_id: i32,
+    pub path: String,
+    pub name: String,
+    pub active_tab_index: i32,
+    pub is_active: bool,
+    pub is_previous: bool,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = window_projects)]
+pub struct NewWindowProject {
+    pub window_id: i32,
+    pub path: String,
+    pub name: String,
+    pub active_tab_index: i32,
+    pub is_active: bool,
+    pub is_previous: bool,
 }
 
 /// The panes data model includes pane_nodes, pane_leaves and pane_branches.

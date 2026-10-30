@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -89,20 +90,33 @@ pub enum Event {
         accepted_action_type: Option<&'static str>,
     },
     /// Execute the workflow identified by `id`.
-    ExecuteWorkflow { id: SyncId },
+    ExecuteWorkflow {
+        id: SyncId,
+    },
     /// Invoke the env vars identified by `id`.
-    InvokeEnvironmentVariables { id: SyncId },
+    InvokeEnvironmentVariables {
+        id: SyncId,
+    },
     /// Open a notebook identified by `id`.
-    OpenNotebook { id: SyncId },
+    OpenNotebook {
+        id: SyncId,
+    },
     /// View the relevant object in the Warp Drive sidebar.
-    ViewInWarpDrive { id: CloudObjectTypeAndId },
+    ViewInWarpDrive {
+        id: CloudObjectTypeAndId,
+    },
     /// Open a file at the given path.
     OpenFile {
         path: String,
         line_and_column_arg: Option<LineAndColumnArg>,
     },
     /// Open a directory at the given path.
-    OpenDirectory { path: String },
+    OpenDirectory {
+        path: String,
+    },
+    SwitchProject {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -396,6 +410,7 @@ impl View {
                 | (PaletteMode::Files, QueryFilter::Files)
                 | (PaletteMode::Conversations, QueryFilter::Conversations)
                 | (PaletteMode::WarpDrive, QueryFilter::Drive)
+                | (PaletteMode::ProjectSessions, QueryFilter::ProjectSessions)
         )
     }
 
@@ -737,6 +752,7 @@ impl View {
         if !matches!(
             result_action,
             CommandPaletteItemAction::NavigateToTab { .. }
+                | CommandPaletteItemAction::SwitchProject { .. }
         ) {
             let selected_items_handle = SelectedItems::handle(ctx);
             selected_items_handle.update(ctx, |selected_items, _ctx| {
@@ -1006,6 +1022,9 @@ impl View {
                         terminal_view_id,
                     });
                 }
+            }
+            CommandPaletteItemAction::SwitchProject { path } => {
+                ctx.emit(Event::SwitchProject { path })
             }
             CommandPaletteItemAction::NoOp => {
                 // No-op action (used for non-interactable separator items that don't do anything on click).
