@@ -536,7 +536,7 @@ fn test_restore_keeps_hidden_project_pending_until_first_switch() {
         snapshot.tabs = vec![restored_terminal_tab(1, &active_dir)];
         snapshot.active_tab_index = 0;
         snapshot.tab_groups = vec![];
-        snapshot.projects = Some(WindowProjectsSnapshot {
+        snapshot.projects = Some(Box::new(WindowProjectsSnapshot {
             active: ProjectRef::for_root(active_dir.clone()),
             previous: Some(hidden_dir.clone()),
             hidden: vec![ProjectSnapshot {
@@ -549,7 +549,7 @@ fn test_restore_keeps_hidden_project_pending_until_first_switch() {
                 tab_groups: vec![],
                 active_tab_index: 1,
             }],
-        });
+        }));
 
         let workspace = restored_workspace(&mut app, snapshot);
         workspace.update(&mut app, |workspace, ctx| {

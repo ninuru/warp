@@ -2549,7 +2549,7 @@ fn split_window_projects(
 ) -> (
     Vec<TabSnapshot>,
     Vec<TabGroupSnapshot>,
-    Option<WindowProjectsSnapshot>,
+    Option<Box<WindowProjectsSnapshot>>,
 ) {
     let active_row_index = project_rows
         .iter()
@@ -2606,7 +2606,7 @@ fn split_window_projects(
         previous,
         hidden,
     };
-    (visible_tabs, remaining_groups, Some(projects))
+    (visible_tabs, remaining_groups, Some(Box::new(projects)))
 }
 
 fn read_sqlite_data(
