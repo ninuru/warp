@@ -104,6 +104,10 @@ lazy_static! {
         primary_text: "diffsets:",
         aliases: vec!["diffs:"]
     };
+    static ref PROJECT_SESSIONS_FILTER_ATOM: FilterAtom = FilterAtom {
+        primary_text: "projects:",
+        aliases: vec![]
+    };
 
     // If a query filter does not have a filter atom, it cannot be applied by typing
     static ref NO_FILTER_ATOM: FilterAtom = FilterAtom {
@@ -222,6 +226,8 @@ pub enum QueryFilter {
 
     /// Include only conversations whose most recent directory matches the session's current working directory.
     CurrentDirectoryConversations,
+
+    ProjectSessions,
 }
 
 impl QueryFilter {
@@ -262,6 +268,7 @@ impl QueryFilter {
             QueryFilter::CurrentDirectoryConversations => {
                 "Search conversations in current directory"
             }
+            QueryFilter::ProjectSessions => "Search projects",
         }
     }
 
@@ -294,6 +301,7 @@ impl QueryFilter {
             QueryFilter::BaseModels => &NO_FILTER_ATOM,
             QueryFilter::FullTerminalUseModels => &NO_FILTER_ATOM,
             QueryFilter::CurrentDirectoryConversations => &NO_FILTER_ATOM,
+            QueryFilter::ProjectSessions => &PROJECT_SESSIONS_FILTER_ATOM,
         }
     }
 
@@ -326,6 +334,7 @@ impl QueryFilter {
             QueryFilter::BaseModels => "base models",
             QueryFilter::FullTerminalUseModels => "full terminal use models",
             QueryFilter::CurrentDirectoryConversations => "current directory conversations",
+            QueryFilter::ProjectSessions => "projects",
         }
     }
 
@@ -365,6 +374,7 @@ impl QueryFilter {
             QueryFilter::BaseModels => None,
             QueryFilter::FullTerminalUseModels => None,
             QueryFilter::CurrentDirectoryConversations => None,
+            QueryFilter::ProjectSessions => Some("bundled/svg/folder.svg"),
         }
     }
 }

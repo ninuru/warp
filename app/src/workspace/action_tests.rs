@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use warpui::EntityId;
 
 use super::WorkspaceAction;
@@ -79,4 +81,16 @@ fn pane_name_actions_save_workspace_state() {
     // same conditions as the locator-based one, since both ultimately drive
     // `rename_pane` which mutates `pane_configuration`.
     assert!(WorkspaceAction::RenameActivePane.should_save_app_state_on_action());
+}
+
+#[test]
+fn project_actions_save_workspace_state_except_picker() {
+    assert!(!WorkspaceAction::OpenProjectPicker.should_save_app_state_on_action());
+    assert!(WorkspaceAction::SwitchToPreviousProject.should_save_app_state_on_action());
+    assert!(
+        WorkspaceAction::SwitchProject {
+            path: PathBuf::from("/tmp")
+        }
+        .should_save_app_state_on_action()
+    );
 }

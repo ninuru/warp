@@ -573,6 +573,59 @@ fn test_action_open_file_editor_parse_rejects_relative_path() {
     assert!(Action::parse(&url).is_err());
 }
 
+fn switch_project_url(query: &str) -> Url {
+    Url::parse(&format!(
+        "{}://action/switch_project{query}",
+        ChannelState::url_scheme()
+    ))
+    .unwrap()
+}
+
+#[test]
+fn test_action_switch_project_parse_with_existing_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut url = switch_project_url("");
+    url.query_pairs_mut()
+        .append_pair("path", &dir.path().to_string_lossy());
+
+    let action = Action::parse(&url).unwrap();
+    match action {
+        Action::SwitchProject { path } => assert_eq!(path, dir.path()),
+        _ => panic!("unexpected action: {action:?}"),
+    }
+}
+
+#[test]
+fn test_action_switch_project_parse_expands_home_dir() {
+    let action = Action::parse(&switch_project_url("?path=~")).unwrap();
+    match action {
+        Action::SwitchProject { path } => {
+            assert_eq!(path, PathBuf::from(shellexpand::tilde("~").into_owned()))
+        }
+        _ => panic!("unexpected action: {action:?}"),
+    }
+}
+
+#[test]
+fn test_action_switch_project_parse_requires_path() {
+    assert!(Action::parse(&switch_project_url("")).is_err());
+}
+
+#[test]
+fn test_action_switch_project_parse_rejects_relative_path() {
+    assert!(Action::parse(&switch_project_url("?path=src")).is_err());
+}
+
+#[test]
+fn test_action_switch_project_parse_rejects_missing_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut url = switch_project_url("");
+    url.query_pairs_mut()
+        .append_pair("path", &dir.path().join("missing").to_string_lossy());
+
+    assert!(Action::parse(&url).is_err());
+}
+
 #[test]
 fn test_action_open_file_editor_parse_rejects_column_without_line() {
     let url = Url::parse(&format!(

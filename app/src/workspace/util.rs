@@ -24,6 +24,7 @@ pub struct PaneViewLocator {
 #[derive(Default)]
 pub(super) struct WorkspaceMouseStates {
     pub(super) new_tab_button: MouseStateHandle,
+    pub(super) project_chip: MouseStateHandle,
     pub(super) new_tab_menu: MouseStateHandle,
     pub(super) new_tab: MouseStateHandle,
     pub(super) overflow_button: MouseStateHandle,

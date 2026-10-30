@@ -4,12 +4,17 @@ use tempfile::TempDir;
 use warpui::{App, EntityId, SingletonEntity, TypedActionView, ViewContext};
 
 use super::{ProjectRef, project_name};
+use crate::app_state::{
+    LeafContents, LeafSnapshot, PaneNodeSnapshot, ProjectSnapshot, TabSnapshot,
+    TerminalPaneSnapshot, WindowProjectsSnapshot,
+};
 use crate::features::FeatureFlag;
-use crate::tab::NewSessionMenuItem;
+use crate::settings::import::model::ImportedConfigModel;
+use crate::tab::{NewSessionMenuItem, SelectedTabColor};
 use crate::terminal::session_settings::{NewSessionSource, SessionSettings, WorkingDirectoryMode};
-use crate::workspace::WorkspaceAction;
 use crate::workspace::view::Workspace;
-use crate::workspace::view::tests::{initialize_app, mock_workspace};
+use crate::workspace::view::tests::{initialize_app, mock_workspace, restored_workspace};
+use crate::workspace::{WorkspaceAction, project_bindings};
 
 pub(super) fn tab_ids(workspace: &Workspace) -> Vec<EntityId> {
     workspace
@@ -298,6 +303,33 @@ fn test_switch_to_previous_project_toggles() {
 }
 
 #[test]
+fn test_switch_to_previous_project_binding_switches() {
+    let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        app.add_singleton_model(ImportedConfigModel::new);
+        app.update(|ctx| ctx.register_editable_bindings(project_bindings()));
+        let workspace = mock_workspace(&mut app);
+        let temp_root = TempDir::new().expect("failed to create temp dir");
+        let root = temp_root.path().to_path_buf();
+        let home = ProjectRef::home().root;
+        workspace.update(&mut app, |workspace, ctx| {
+            workspace.switch_to_project(root.clone(), ctx)
+        });
+
+        let window_id = app.read(|ctx| workspace.window_id(ctx));
+        let handled = app.update(|ctx| {
+            ctx.dispatch_binding_by_name(window_id, "workspace:switch_to_previous_project")
+        });
+
+        assert!(handled.expect("binding dispatch failed"));
+        workspace.read(&app, |workspace, _| {
+            assert_eq!(workspace.active_project().root, home)
+        });
+    });
+}
+
+#[test]
 fn test_new_tab_starts_in_project_root() {
     let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
     App::test((), |mut app| async move {
@@ -452,6 +484,103 @@ fn test_split_pane_and_home_project_keep_default_directory() {
             assert_eq!(
                 workspace.project_startup_directory(NewSessionSource::Tab, ctx),
                 Some(root.clone())
+            );
+        });
+    });
+}
+
+fn restored_terminal_tab(uuid: u8, cwd: &Path) -> TabSnapshot {
+    TabSnapshot {
+        custom_title: Some(cwd.to_string_lossy().into_owned()),
+        root: PaneNodeSnapshot::Leaf(LeafSnapshot {
+            is_focused: true,
+            custom_vertical_tabs_title: None,
+            contents: LeafContents::Terminal(TerminalPaneSnapshot {
+                uuid: vec![uuid],
+                cwd: Some(cwd.to_string_lossy().into_owned()),
+                shell_launch_data: None,
+                is_active: true,
+                is_read_only: false,
+                input_config: None,
+                llm_model_override: None,
+                active_profile_id: None,
+                conversation_ids_to_restore: vec![],
+                active_conversation_id: None,
+            }),
+        }),
+        default_directory_color: None,
+        selected_color: SelectedTabColor::default(),
+        left_panel: None,
+        right_panel: None,
+        group_id: None,
+        pinned: false,
+    }
+}
+
+#[test]
+fn test_restore_keeps_hidden_project_pending_until_first_switch() {
+    let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let active_root = TempDir::new().expect("failed to create temp dir");
+        let hidden_root = TempDir::new().expect("failed to create temp dir");
+        let active_dir = active_root.path().to_path_buf();
+        let hidden_dir = hidden_root.path().to_path_buf();
+        let hidden_sub_dir = hidden_dir.join("sub");
+        std::fs::create_dir(&hidden_sub_dir).expect("failed to create sub dir");
+
+        let base = mock_workspace(&mut app);
+        let mut snapshot = base.update(&mut app, |workspace, ctx| {
+            workspace.snapshot(ctx.window_id(), false, ctx)
+        });
+        snapshot.tabs = vec![restored_terminal_tab(1, &active_dir)];
+        snapshot.active_tab_index = 0;
+        snapshot.tab_groups = vec![];
+        snapshot.projects = Some(Box::new(WindowProjectsSnapshot {
+            active: ProjectRef::for_root(active_dir.clone()),
+            previous: Some(hidden_dir.clone()),
+            hidden: vec![ProjectSnapshot {
+                root: hidden_dir.clone(),
+                name: project_name(&hidden_dir),
+                tabs: vec![
+                    restored_terminal_tab(2, &hidden_dir),
+                    restored_terminal_tab(3, &hidden_sub_dir),
+                ],
+                tab_groups: vec![],
+                active_tab_index: 1,
+            }],
+        }));
+
+        let workspace = restored_workspace(&mut app, snapshot);
+        workspace.update(&mut app, |workspace, ctx| {
+            assert_eq!(workspace.tab_count(), 1);
+            assert_eq!(workspace.tab_views().count(), 1);
+            assert_eq!(workspace.active_project().root, active_dir);
+            assert_eq!(
+                workspace.open_projects(),
+                vec![
+                    ProjectRef::for_root(active_dir.clone()),
+                    ProjectRef::for_root(hidden_dir.clone())
+                ]
+            );
+
+            workspace.switch_to_previous_project(ctx);
+
+            assert_eq!(workspace.active_project().root, hidden_dir);
+            assert_eq!(workspace.tab_count(), 2);
+            assert_eq!(workspace.tab_views().count(), 3);
+            assert_eq!(workspace.active_tab_index, 1);
+            let directories: Vec<_> = workspace
+                .tabs
+                .iter()
+                .map(|tab| {
+                    let pane_group = tab.pane_group.as_ref(ctx);
+                    pane_group.startup_path_for_new_session(pane_group.active_session_id(ctx), ctx)
+                })
+                .collect();
+            assert_eq!(
+                directories,
+                vec![Some(hidden_dir.clone()), Some(hidden_sub_dir.clone())]
             );
         });
     });

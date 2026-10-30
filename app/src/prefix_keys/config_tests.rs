@@ -28,7 +28,7 @@ fn defaults_parse_without_errors() {
     assert!(config.enabled);
     assert!(keymap.is_prefix(&key("ctrl-a")));
     assert_eq!(keymap.timeout(), Duration::from_millis(1500));
-    assert_eq!(keymap.bindings.len(), 20);
+    assert_eq!(keymap.bindings.len(), 24);
     assert_eq!(keymap.root.len(), 15);
 }
 
@@ -78,7 +78,7 @@ fn defaults_map_tmux_keys() {
     );
     assert_eq!(
         keymap.binding_for(&key("l")),
-        Some("pane_group:navigate_right")
+        Some("workspace:switch_to_previous_project")
     );
     assert_eq!(
         keymap.binding_for(&key("shift-\"")),
