@@ -22,6 +22,7 @@ use crate::terminal::TerminalView;
 use crate::terminal::input::{
     SET_INPUT_MODE_AGENT_ACTION_NAME, SET_INPUT_MODE_TERMINAL_ACTION_NAME,
 };
+use crate::terminal::model::blocks::CopyModeMotion;
 use crate::terminal::model::escape_sequences::{self, EscCodes};
 use crate::terminal::model::selection::SelectionDirection;
 use crate::terminal::shared_session::{SharedSessionActionSource, SharedSessionStatus};
@@ -295,6 +296,58 @@ pub fn init(app: &mut AppContext) {
             TerminalAction::KeyboardSelectText(SelectionDirection::Down),
             id!("Terminal") & !id!("IMEOpen") & id!("ActiveBlockTextSelection"),
         ),
+    ]);
+
+    app.register_editable_bindings([EditableBinding::new(
+        "terminal:enter_copy_mode",
+        "Enter copy mode",
+        TerminalAction::EnterCopyMode,
+    )
+    .with_context_predicate(
+        id!("Terminal") & id!("TerminalView_NonEmptyBlockList") & !id!("AltScreen"),
+    )]);
+
+    let copy_mode = id!("Terminal") & id!("CopyMode");
+    app.register_fixed_bindings([
+        FixedBinding::new(
+            "h",
+            TerminalAction::CopyModeMove(CopyModeMotion::Left),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "j",
+            TerminalAction::CopyModeMove(CopyModeMotion::Down),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "k",
+            TerminalAction::CopyModeMove(CopyModeMotion::Up),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "l",
+            TerminalAction::CopyModeMove(CopyModeMotion::Right),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "w",
+            TerminalAction::CopyModeMove(CopyModeMotion::WordForward),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "b",
+            TerminalAction::CopyModeMove(CopyModeMotion::WordBackward),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "e",
+            TerminalAction::CopyModeMove(CopyModeMotion::WordEnd),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new("v", TerminalAction::CopyModeToggleVisual, copy_mode.clone()),
+        FixedBinding::new("y", TerminalAction::CopyModeYank, copy_mode.clone()),
+        FixedBinding::new("q", TerminalAction::ExitCopyMode, copy_mode.clone()),
+        FixedBinding::new("escape", TerminalAction::ExitCopyMode, copy_mode),
     ]);
 
     app.register_editable_bindings([

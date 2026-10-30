@@ -36,6 +36,7 @@ use crate::terminal::block_list_element::{
 };
 use crate::terminal::block_list_viewport::OverhangingBlock;
 use crate::terminal::model::SecretHandle;
+use crate::terminal::model::blocks::CopyModeMotion;
 use crate::terminal::model::completions::ShellCompletion;
 use crate::terminal::model::index::Point;
 use crate::terminal::model::mouse::MouseState;
@@ -185,6 +186,11 @@ pub enum TerminalAction {
     Home,
     End,
     KeyboardSelectText(SelectionDirection),
+    EnterCopyMode,
+    CopyModeMove(CopyModeMotion),
+    CopyModeToggleVisual,
+    CopyModeYank,
+    ExitCopyMode,
     UserInputSequence(Vec<u8>),
     ControlSequence(Vec<u8>),
     RunNativeShellCompletions {
@@ -554,6 +560,11 @@ impl fmt::Debug for TerminalAction {
             Home => f.write_str("Home"),
             End => f.write_str("End"),
             KeyboardSelectText(direction) => write!(f, "KeyboardSelectText({direction:?})"),
+            EnterCopyMode => f.write_str("EnterCopyMode"),
+            CopyModeMove(motion) => write!(f, "CopyModeMove({motion:?})"),
+            CopyModeToggleVisual => f.write_str("CopyModeToggleVisual"),
+            CopyModeYank => f.write_str("CopyModeYank"),
+            ExitCopyMode => f.write_str("ExitCopyMode"),
             ContextMenu(action) => write!(f, "ContextMenu({action:?})"),
             CtrlD => f.write_str("CtrlD"),
             CtrlC => f.write_str("CtrlC"),

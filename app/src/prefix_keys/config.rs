@@ -31,7 +31,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("l", "workspace:switch_to_previous_project"),
     ("s", "workspace:list_open_projects"),
     ("$", "workspace:rename_project"),
-    ("[", "terminal:select_previous_block"),
+    ("[", "terminal:enter_copy_mode"),
 ];
 const DEFAULT_ROOT_BINDINGS: &[(&str, &str)] = &[
     ("alt-1", "workspace:activate_first_tab"),
