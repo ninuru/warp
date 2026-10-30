@@ -2153,6 +2153,28 @@ impl BlockListElement {
         }
     }
 
+    fn render_copy_mode_cursor(
+        &self,
+        origin: Vector2F,
+        block_list: &BlockList,
+        ctx: &mut PaintContext<'_>,
+    ) {
+        let Some(cursor) = block_list.copy_mode_cursor() else {
+            return;
+        };
+        let point = BlockListPoint::from_within_block_point(&cursor, block_list);
+        let mut color = self.warp_theme.cursor().into_solid();
+        color.a = self.warp_theme.text_selection_color().into_solid().a;
+        self.render_selection(
+            &SelectionRange::new(point, point),
+            origin,
+            block_list,
+            color,
+            SelectionCursorRenderLocation::None,
+            ctx,
+        );
+    }
+
     fn render_shared_session_participants_selections(
         &self,
         origin: Vector2F,
@@ -4423,6 +4445,7 @@ impl Element for BlockListElement {
                 );
             }
         };
+        self.render_copy_mode_cursor(origin, block_list, ctx);
         self.render_shared_session_participants_selections(origin, block_list, app, ctx);
 
         if !cli_subagent_views_to_paint.is_empty() {

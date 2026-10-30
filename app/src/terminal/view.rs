@@ -445,7 +445,7 @@ use crate::terminal::model::block::{
 use crate::terminal::model::blockgrid::BlockGrid;
 use crate::terminal::model::blocks::{
     AgentTranscriptNavigableItem, BlockHeight, BlockHeightItem, BlockHeightSummary, BlockList,
-    BlockListPoint, Gap, RemovableBlocklistItem,
+    BlockListPoint, CopyModeMotion, Gap, RemovableBlocklistItem,
 };
 use crate::terminal::model::escape_sequences::{
     self, C1, EscCodes, ToEscapeSequence, alt_screen_scroll_to_pty_bytes,
@@ -9843,6 +9843,9 @@ impl TerminalView {
     /// Receiving the warpui::Event::KeyDown event from a child element.
     /// Generally, this should be control characters rather than printable characters.
     fn keydown_on_terminal(&mut self, characters: &str, ctx: &mut ViewContext<Self>) {
+        if self.is_in_copy_mode() {
+            return;
+        }
         if self.is_long_running() {
             self.highlighted_link.invalidate();
             self.report_possible_typeahead(characters);
@@ -9887,6 +9890,9 @@ impl TerminalView {
     /// We can assume `characters` consists of all printable characters, and therefore,
     /// can go into the input box.
     fn typed_characters_on_terminal(&mut self, characters: &str, ctx: &mut ViewContext<Self>) {
+        if self.is_in_copy_mode() {
+            return;
+        }
         if self.should_write_typed_chars_to_pty(ctx) {
             self.highlighted_link.invalidate();
             self.report_possible_typeahead(characters);
@@ -19110,6 +19116,9 @@ impl TerminalView {
         F: FnOnce(&mut SelectedBlocks),
     {
         change_selection(&mut self.selected_blocks);
+        if !self.selected_blocks.is_empty() && self.is_in_copy_mode() {
+            self.clear_selected_text(ctx);
+        }
         self.update_find_selection(ctx);
 
         // In AI mode, selected blocks also serve as context. When we change the block
@@ -22144,7 +22153,9 @@ impl TerminalView {
                 && (are_blocks_selected || is_text_selected)
                 && selection_holds_focus;
 
-            has_active_user_terminal_command || has_block_or_text_selection_in_shell_mode
+            block_list.copy_mode().is_some()
+                || has_active_user_terminal_command
+                || has_block_or_text_selection_in_shell_mode
         };
         let blocked_cli_subagent_view = {
             let model = self.model.lock();
@@ -23933,6 +23944,104 @@ impl TerminalView {
         });
 
         ctx.notify();
+    }
+
+    fn is_in_copy_mode(&self) -> bool {
+        self.model.lock().block_list().copy_mode().is_some()
+    }
+
+    fn enter_copy_mode(&mut self, ctx: &mut ViewContext<Self>) {
+        if !FeatureFlag::PrefixKeys.is_enabled() || self.model.lock().is_alt_screen_active() {
+            return;
+        }
+        self.clear_selected_blocks(ctx);
+        self.clear_selected_text(ctx);
+        let inverted = self.is_inverted_blocklist(ctx);
+        let entered = self
+            .model
+            .lock()
+            .block_list_mut()
+            .enter_copy_mode(inverted)
+            .is_some();
+        if !entered {
+            return;
+        }
+        self.scroll_to_copy_mode_cursor(ctx);
+        self.focus_terminal(ctx);
+    }
+
+    fn copy_mode_move(&mut self, motion: CopyModeMotion, ctx: &mut ViewContext<Self>) {
+        let inverted = self.is_inverted_blocklist(ctx);
+        let moved = self
+            .model
+            .lock()
+            .block_list_mut()
+            .copy_mode_move(motion, inverted)
+            .is_some();
+        if !moved {
+            self.redetermine_global_focus(ctx);
+        }
+        self.scroll_to_copy_mode_cursor(ctx);
+        ctx.notify();
+    }
+
+    fn copy_mode_toggle_visual(&mut self, ctx: &mut ViewContext<Self>) {
+        let inverted = self.is_inverted_blocklist(ctx);
+        let toggled = self
+            .model
+            .lock()
+            .block_list_mut()
+            .copy_mode_toggle_visual(inverted)
+            .is_some();
+        if !toggled {
+            self.redetermine_global_focus(ctx);
+        }
+        ctx.notify();
+    }
+
+    fn copy_mode_yank(&mut self, ctx: &mut ViewContext<Self>) {
+        let has_anchor = self
+            .model
+            .lock()
+            .block_list()
+            .copy_mode()
+            .is_some_and(|state| state.anchor.is_some());
+        if !has_anchor {
+            return;
+        }
+        let inverted = self.is_inverted_blocklist(ctx);
+        let semantic_selection = SemanticSelection::as_ref(ctx);
+        let text =
+            self.model
+                .lock()
+                .block_list()
+                .selection_to_string(semantic_selection, inverted, ctx);
+        if let Some(text) = text {
+            ctx.clipboard().write(ClipboardContent::plain_text(text));
+        }
+        self.exit_copy_mode(ctx);
+    }
+
+    fn exit_copy_mode(&mut self, ctx: &mut ViewContext<Self>) {
+        if !self.is_in_copy_mode() {
+            return;
+        }
+        self.clear_selected_text(ctx);
+        self.redetermine_global_focus(ctx);
+        ctx.notify();
+    }
+
+    fn scroll_to_copy_mode_cursor(&mut self, ctx: &mut ViewContext<Self>) {
+        let row = {
+            let model = self.model.lock();
+            let block_list = model.block_list();
+            block_list
+                .copy_mode_cursor()
+                .map(|cursor| BlockListPoint::from_within_block_point(&cursor, block_list).row)
+        };
+        if let Some(row) = row {
+            self.scroll_to_row_if_not_visible(row, ctx);
+        }
     }
 
     /// Takes a row in the blocklist coordinate space.
@@ -27761,6 +27870,11 @@ impl TypedActionView for TerminalView {
             | Home
             | End
             | KeyboardSelectText(_)
+            | EnterCopyMode
+            | CopyModeMove(_)
+            | CopyModeToggleVisual
+            | CopyModeYank
+            | ExitCopyMode
             | ContextMenu(_)
             | SplitRight(_)
             | SplitLeft(_)
@@ -28123,6 +28237,11 @@ impl TypedActionView for TerminalView {
             Home => self.move_home(ctx),
             End => self.move_end(ctx),
             KeyboardSelectText(direction) => self.keyboard_select_text(ctx, direction),
+            EnterCopyMode => self.enter_copy_mode(ctx),
+            CopyModeMove(motion) => self.copy_mode_move(*motion, ctx),
+            CopyModeToggleVisual => self.copy_mode_toggle_visual(ctx),
+            CopyModeYank => self.copy_mode_yank(ctx),
+            ExitCopyMode => self.exit_copy_mode(ctx),
             SelectBookmarkUp => match input_mode {
                 InputMode::PinnedToBottom | InputMode::Waterfall => self.bookmark_up(ctx),
                 InputMode::PinnedToTop => self.bookmark_down(ctx),
@@ -29655,6 +29774,10 @@ impl View for TerminalView {
             // Make sure to close link tooltips when terminal view is not in focus.
             self.open_grid_link_tool_tip.take();
 
+            if self.is_in_copy_mode() {
+                self.clear_selected_text(ctx);
+            }
+
             self.maybe_report_focus_out(ctx);
             ctx.notify();
         }
@@ -29683,6 +29806,10 @@ impl View for TerminalView {
         }
         if input.is_voltron_open() {
             context.set.insert("VoltronActive");
+        }
+
+        if model_lock.block_list().copy_mode().is_some() {
+            context.set.insert("CopyMode");
         }
 
         if model_lock.block_list().selection().is_some() {

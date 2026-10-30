@@ -1,3 +1,4 @@
+mod copy_mode;
 mod selection;
 
 use std::collections::{HashMap, HashSet};
@@ -8,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
+pub use copy_mode::{CopyModeMotion, CopyModeState};
 use instant::SystemTime;
 use rustc_hash::FxHashMap;
 use selection::BlockListSelection;
@@ -307,6 +309,7 @@ pub struct BlockList {
     /// copy/insert paths can find the selected text via
     /// [`rich_content_blocks_in_selection`](Self::rich_content_blocks_in_selection).
     rich_content_selections: Vec<EntityId>,
+    copy_mode: Option<CopyModeState>,
     /// If this is Some, and if smart-select is enabled, double-clicking within this range will
     /// select this range instead of the normal smart-select logic. The purpose of this is to
     /// allow double-click selection to work on the TerminalView::highlighted_link even when it
@@ -688,6 +691,7 @@ impl BlockList {
             event_proxy: event_proxy.clone(),
             selection: None,
             rich_content_selections: Vec::new(),
+            copy_mode: None,
             smart_select_override: None,
             bootstrap_stage,
             padding: sizes.block_padding,
@@ -942,6 +946,7 @@ impl BlockList {
 
     /// Clears the visible screen--moving everything that's currently visible into scrollback.
     pub fn clear_visible_screen(&mut self) {
+        self.exit_copy_mode();
         self.finish_background_block();
         let mut new_sum_tree = SumTree::new();
 
@@ -3946,6 +3951,7 @@ impl ansi::Handler for BlockList {
                 }
                 // Clear existing selection.
                 self.selection.take();
+                self.copy_mode = None;
 
                 // Remove the active gap since it was removed from the block heights sum tree.
                 self.active_gap.take();

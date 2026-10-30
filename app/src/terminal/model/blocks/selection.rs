@@ -400,6 +400,7 @@ impl BlockList {
         // A new point-based selection supersedes any rich content (AI) block
         // selection (single-selection semantics).
         self.rich_content_selections.clear();
+        self.copy_mode = None;
         let mut selection = BlockListSelection::new(point, selection_type, side);
         if let Some(smart_select_override) = &self.smart_select_override {
             let (override_start, override_end) = smart_select_override.unfold_range();
@@ -865,6 +866,7 @@ impl BlockList {
 
     pub fn clear_selection(&mut self) {
         self.selection = None;
+        self.copy_mode = None;
         self.rich_content_selections.clear();
         self.event_proxy
             .send_app_event(TerminalEvent::TextSelectionChanged);
@@ -877,6 +879,7 @@ impl BlockList {
     /// paths find the selected text via
     /// [`rich_content_blocks_in_selection`](Self::rich_content_blocks_in_selection).
     pub fn set_rich_content_selection(&mut self, view_id: EntityId) {
+        self.copy_mode = None;
         if self.selection.is_some() {
             // A point-based selection is active. If it already spans this rich
             // content block (e.g. a selection dragged from a command block

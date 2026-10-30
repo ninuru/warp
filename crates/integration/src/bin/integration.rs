@@ -536,6 +536,8 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
     register_test!(test_root_alt_number_switches_tab);
     register_test!(test_root_ctrl_shift_enter_splits_right);
     register_test!(test_root_alt_shift_enter_splits_down);
+    register_test!(test_copy_mode_yanks_selection);
+    register_test!(test_copy_mode_cursor_screenshot);
 
     tests
 }
