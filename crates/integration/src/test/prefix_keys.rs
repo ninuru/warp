@@ -8,7 +8,7 @@ use warp::integration_testing::terminal::{
     wait_until_bootstrapped_single_pane_for_tab,
 };
 use warp::integration_testing::view_getters::single_terminal_view_for_tab;
-use warp::integration_testing::workspace::assert_tab_count;
+use warp::integration_testing::workspace::{assert_focused_tab_index, assert_tab_count};
 use warpui_core::event::KeyEventDetails;
 use warpui_core::integration::{AssertionOutcome, TestStep};
 use warpui_core::keymap::Keystroke;
@@ -146,5 +146,53 @@ pub fn test_prefix_escape_cancels() -> Builder {
                 "input editor contains `c`",
                 assert_input_editor_contents(0, "c"),
             ),
+    )
+}
+
+pub fn test_root_alt_number_switches_tab() -> Builder {
+    prefix_builder()
+        .with_step(
+            new_step_with_default_assertions("ctrl-a c opens a second tab")
+                .with_event(ctrl_a())
+                .with_keystrokes(&["c"])
+                .add_named_assertion("workspace has two tabs", assert_tab_count(2))
+                .add_named_assertion("second tab is active", assert_focused_tab_index(1)),
+        )
+        .with_step(wait_until_bootstrapped_single_pane_for_tab(1))
+        .with_step(
+            new_step_with_default_assertions("alt-1 activates the first tab")
+                .with_keystrokes(&["alt-1"])
+                .add_named_assertion("first tab is active", assert_focused_tab_index(0))
+                .add_named_assertion(
+                    "first tab input editor did not receive `1`",
+                    assert_input_editor_contents(0, ""),
+                ),
+        )
+        .with_step(
+            new_step_with_default_assertions("alt-2 activates the second tab")
+                .with_keystrokes(&["alt-2"])
+                .add_named_assertion("second tab is active", assert_focused_tab_index(1))
+                .add_named_assertion(
+                    "second tab input editor did not receive `2`",
+                    assert_input_editor_contents(1, ""),
+                ),
+        )
+}
+
+pub fn test_root_ctrl_shift_enter_splits_right() -> Builder {
+    prefix_builder().with_step(
+        new_step_with_default_assertions("ctrl-shift-enter splits the pane to the right")
+            .with_keystrokes(&["ctrl-shift-enter"])
+            .add_named_assertion("workspace still has one tab", assert_tab_count(1))
+            .add_named_assertion("active tab has two panes", assert_num_panes_in_tab(0, 2)),
+    )
+}
+
+pub fn test_root_alt_shift_enter_splits_down() -> Builder {
+    prefix_builder().with_step(
+        new_step_with_default_assertions("alt-shift-enter splits the pane down")
+            .with_keystrokes(&["alt-shift-enter"])
+            .add_named_assertion("workspace still has one tab", assert_tab_count(1))
+            .add_named_assertion("active tab has two panes", assert_num_panes_in_tab(0, 2)),
     )
 }

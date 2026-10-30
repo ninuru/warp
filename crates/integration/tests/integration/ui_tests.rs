@@ -395,4 +395,7 @@ integration_tests! {
     test_prefix_twice_passes_through,
     test_prefix_timeout_cancels,
     test_prefix_escape_cancels,
+    test_root_alt_number_switches_tab,
+    test_root_ctrl_shift_enter_splits_right,
+    test_root_alt_shift_enter_splits_down,
 }

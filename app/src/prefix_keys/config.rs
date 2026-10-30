@@ -29,6 +29,23 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("^", "workspace:activate_last_active_tab"),
     (",", "workspace:rename_active_tab"),
 ];
+const DEFAULT_ROOT_BINDINGS: &[(&str, &str)] = &[
+    ("alt-1", "workspace:activate_first_tab"),
+    ("alt-2", "workspace:activate_second_tab"),
+    ("alt-3", "workspace:activate_third_tab"),
+    ("alt-4", "workspace:activate_fourth_tab"),
+    ("alt-5", "workspace:activate_fifth_tab"),
+    ("alt-6", "workspace:activate_sixth_tab"),
+    ("alt-7", "workspace:activate_seventh_tab"),
+    ("alt-8", "workspace:activate_eighth_tab"),
+    ("alt-9", "workspace:activate_last_tab"),
+    ("alt-h", "pane_group:navigate_left"),
+    ("alt-j", "pane_group:navigate_down"),
+    ("alt-k", "pane_group:navigate_up"),
+    ("alt-l", "pane_group:navigate_right"),
+    ("ctrl-shift-enter", "pane_group:add_right"),
+    ("alt-shift-enter", "pane_group:add_down"),
+];
 
 #[derive(
     Clone,
@@ -66,13 +83,17 @@ impl Default for PrefixKeysConfig {
             enabled: true,
             key: DEFAULT_PREFIX_KEY.to_owned(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
-            bindings: DEFAULT_BINDINGS
-                .iter()
-                .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
-                .collect(),
-            root_bindings: HashMap::new(),
+            bindings: table_from(DEFAULT_BINDINGS),
+            root_bindings: table_from(DEFAULT_ROOT_BINDINGS),
         }
     }
+}
+
+fn table_from(entries: &[(&str, &str)]) -> HashMap<String, String> {
+    entries
+        .iter()
+        .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
+        .collect()
 }
 
 #[derive(Clone, Debug)]
