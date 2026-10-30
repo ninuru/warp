@@ -533,6 +533,9 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
     register_test!(test_prefix_timeout_cancels);
     register_test!(test_prefix_escape_cancels);
     register_test!(test_prefix_pending_indicator);
+    register_test!(test_root_alt_number_switches_tab);
+    register_test!(test_root_ctrl_shift_enter_splits_right);
+    register_test!(test_root_alt_shift_enter_splits_down);
 
     tests
 }

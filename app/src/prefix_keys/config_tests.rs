@@ -26,11 +26,46 @@ fn defaults_parse_without_errors() {
 
     assert!(errors.is_empty(), "{errors:?}");
     assert!(config.enabled);
-    assert!(config.root_bindings.is_empty());
     assert!(keymap.is_prefix(&key("ctrl-a")));
     assert_eq!(keymap.timeout(), Duration::from_millis(1500));
     assert_eq!(keymap.bindings.len(), 20);
-    assert!(keymap.root.is_empty());
+    assert_eq!(keymap.root.len(), 15);
+}
+
+#[test]
+fn defaults_map_tmux_root_keys() {
+    let (keymap, _) = PrefixKeymap::parse(&PrefixKeysConfig::default());
+    let expected = [
+        ("alt-1", "workspace:activate_first_tab"),
+        ("alt-2", "workspace:activate_second_tab"),
+        ("alt-3", "workspace:activate_third_tab"),
+        ("alt-4", "workspace:activate_fourth_tab"),
+        ("alt-5", "workspace:activate_fifth_tab"),
+        ("alt-6", "workspace:activate_sixth_tab"),
+        ("alt-7", "workspace:activate_seventh_tab"),
+        ("alt-8", "workspace:activate_eighth_tab"),
+        ("alt-9", "workspace:activate_last_tab"),
+        ("alt-h", "pane_group:navigate_left"),
+        ("alt-j", "pane_group:navigate_down"),
+        ("alt-k", "pane_group:navigate_up"),
+        ("alt-l", "pane_group:navigate_right"),
+        ("ctrl-shift-enter", "pane_group:add_right"),
+        ("alt-shift-enter", "pane_group:add_down"),
+    ];
+
+    for (source, name) in expected {
+        assert_eq!(
+            keymap.root_binding_for(&key(source)),
+            Some(name),
+            "{source}"
+        );
+    }
+    assert_eq!(keymap.root_binding_for(&key("1")), None);
+    assert_eq!(keymap.root_binding_for(&key("h")), None);
+    assert_eq!(keymap.root_binding_for(&key("enter")), None);
+    assert_eq!(keymap.root_binding_for(&key("ctrl-enter")), None);
+    assert_eq!(keymap.root_binding_for(&key("shift-enter")), None);
+    assert_eq!(keymap.root_binding_for(&key("alt-shift-H")), None);
 }
 
 #[test]
