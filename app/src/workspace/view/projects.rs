@@ -123,12 +123,10 @@ impl Workspace {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn active_project(&self) -> &ProjectRef {
         &self.active_project
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn open_projects(&self) -> Vec<ProjectRef> {
         std::iter::once(self.active_project.clone())
             .chain(

@@ -13,6 +13,7 @@ use crate::search::action::CommandBindingDataSource;
 use crate::search::binding_source::BindingSource;
 use crate::search::command_palette::mixer::{CommandPaletteItemAction, ItemSummary};
 use crate::search::command_palette::new_session::NewSessionDataSource;
+use crate::search::command_palette::projects::ProjectDataSource;
 use crate::search::command_palette::repos::RepoDataSource;
 use crate::search::command_palette::{CommandPaletteMixer, files, launch_config, navigation, tabs};
 use crate::search::data_source::QueryResult;
@@ -20,6 +21,7 @@ use crate::search::files::model::FileSearchModel;
 use crate::search::mixer::AddAsyncSourceOptions;
 use crate::session_management::SessionSource;
 use crate::settings::AISettings;
+use crate::workspace::view::projects::ProjectRef;
 
 /// Store of all of the [`crate::search::DataSource`]s for the command palette.
 pub struct DataSourceStore {
@@ -30,6 +32,7 @@ pub struct DataSourceStore {
     new_session_data_source: Option<ModelHandle<NewSessionDataSource>>,
     all_conversation_data_source: ModelHandle<conversations::DataSource>,
     repo_data_source: ModelHandle<RepoDataSource>,
+    project_data_source: ModelHandle<ProjectDataSource>,
     tabs_data_source: Option<ModelHandle<tabs::DataSource>>,
 }
 
@@ -60,6 +63,8 @@ impl DataSourceStore {
 
         let repo_data_source = ctx.add_model(|_| RepoDataSource::new());
 
+        let project_data_source = ctx.add_model(|_| ProjectDataSource::default());
+
         Self {
             actions_data_source,
             sessions_data_source,
@@ -68,6 +73,7 @@ impl DataSourceStore {
             new_session_data_source,
             all_conversation_data_source,
             repo_data_source,
+            project_data_source,
             tabs_data_source: None,
         }
     }
@@ -156,8 +162,25 @@ impl DataSourceStore {
                 HashSet::from([QueryFilter::Repos]),
             );
 
+            if FeatureFlag::ProjectSessions.is_enabled() {
+                mixer.add_sync_source(
+                    self.project_data_source.clone(),
+                    HashSet::from([QueryFilter::ProjectSessions]),
+                );
+            }
+
             ctx.notify();
         });
+    }
+
+    pub fn refresh_projects(
+        &self,
+        open: Vec<ProjectRef>,
+        active: PathBuf,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.project_data_source
+            .update(ctx, |source, ctx| source.refresh(open, active, ctx));
     }
 
     /// Resets the [`CommandPaletteMixer`] to the set of data sources relevant for the Ctrl+Tab
