@@ -42,6 +42,7 @@ use warp_core::context_flag::ContextFlag;
 use warpui::AppContext;
 use warpui::accessibility::AccessibilityVerbosity;
 use warpui::elements::DropTargetData;
+use warpui::keymap::macros::id;
 use warpui::keymap::{BindingDescription, EditableBinding, FixedBinding};
 
 use crate::ai::blocklist::NEW_AGENT_PANE_LABEL;
@@ -74,11 +75,41 @@ use crate::workspace::view::{
     TOGGLE_VERTICAL_TABS_PANEL_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 
+pub(crate) fn project_bindings() -> [EditableBinding; 3] {
+    [
+        EditableBinding::new(
+            "workspace:open_project_picker",
+            "Open project picker",
+            WorkspaceAction::OpenProjectPicker,
+        )
+        .with_context_predicate(id!("Workspace"))
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_enabled(|| FeatureFlag::ProjectSessions.is_enabled()),
+        EditableBinding::new(
+            "workspace:switch_to_previous_project",
+            "Switch to last project",
+            WorkspaceAction::SwitchToPreviousProject,
+        )
+        .with_context_predicate(id!("Workspace"))
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_enabled(|| FeatureFlag::ProjectSessions.is_enabled()),
+        EditableBinding::new(
+            "workspace:list_open_projects",
+            "List open projects",
+            WorkspaceAction::OpenProjectPicker,
+        )
+        .with_context_predicate(id!("Workspace"))
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_enabled(|| FeatureFlag::ProjectSessions.is_enabled()),
+    ]
+}
+
 pub fn init(app: &mut AppContext) {
     app.add_singleton_model(|_| WorkspaceRegistry::new());
     app.add_singleton_model(|_| cross_window_tab_drag::CrossWindowTabDrag::new());
     use warpui::keymap::macros::*;
     app.register_binding_validator::<Workspace>(is_binding_pty_compliant);
+    app.register_editable_bindings(project_bindings());
 
     modal::init(app);
     native_modal::init(app);

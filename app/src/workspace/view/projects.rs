@@ -109,7 +109,6 @@ impl Workspace {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn switch_to_previous_project(&mut self, ctx: &mut ViewContext<Self>) {
         let Some(previous) = self.previous_project.clone() else {
             return;

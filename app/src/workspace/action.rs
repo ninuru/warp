@@ -304,6 +304,11 @@ pub enum WorkspaceAction {
         mode: PaletteMode,
         source: PaletteSource,
     },
+    OpenProjectPicker,
+    SwitchToPreviousProject,
+    SwitchProject {
+        path: PathBuf,
+    },
     ShowUpgrade,
     ShowReferralSettingsPage,
     JoinSlack,
@@ -1008,6 +1013,8 @@ impl WorkspaceAction {
             | ForkAIConversation { .. }
             | SummarizeAIConversation { .. }
             | OpenRepository { .. }
+            | SwitchToPreviousProject
+            | SwitchProject { .. }
             | SelectTabConfig(_)
             | ToggleVerticalTabsPanel
             | OpenVerticalTabsPanel => true, // actions that actually change a state of the state of user's
@@ -1214,6 +1221,7 @@ impl WorkspaceAction {
             | OpenNetworkLogPane
             | OpenNewWindowForTeam { .. }
             | BrowseTeams
+            | OpenProjectPicker
             | ShowTeamSwitcherMenu => false,
             #[cfg(debug_assertions)]
             ShowHoaOnboardingFlow => false,

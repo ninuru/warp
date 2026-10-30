@@ -9,11 +9,12 @@ use crate::app_state::{
     TerminalPaneSnapshot, WindowProjectsSnapshot,
 };
 use crate::features::FeatureFlag;
+use crate::settings::import::model::ImportedConfigModel;
 use crate::tab::{NewSessionMenuItem, SelectedTabColor};
 use crate::terminal::session_settings::{NewSessionSource, SessionSettings, WorkingDirectoryMode};
-use crate::workspace::WorkspaceAction;
 use crate::workspace::view::Workspace;
 use crate::workspace::view::tests::{initialize_app, mock_workspace, restored_workspace};
+use crate::workspace::{WorkspaceAction, project_bindings};
 
 pub(super) fn tab_ids(workspace: &Workspace) -> Vec<EntityId> {
     workspace
@@ -297,6 +298,33 @@ fn test_switch_to_previous_project_toggles() {
             workspace.switch_to_previous_project(ctx);
             assert_eq!(workspace.active_project().root, root);
             assert_eq!(workspace.open_projects().len(), 2);
+        });
+    });
+}
+
+#[test]
+fn test_switch_to_previous_project_binding_switches() {
+    let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        app.add_singleton_model(ImportedConfigModel::new);
+        app.update(|ctx| ctx.register_editable_bindings(project_bindings()));
+        let workspace = mock_workspace(&mut app);
+        let temp_root = TempDir::new().expect("failed to create temp dir");
+        let root = temp_root.path().to_path_buf();
+        let home = ProjectRef::home().root;
+        workspace.update(&mut app, |workspace, ctx| {
+            workspace.switch_to_project(root.clone(), ctx)
+        });
+
+        let window_id = app.read(|ctx| workspace.window_id(ctx));
+        let handled = app.update(|ctx| {
+            ctx.dispatch_binding_by_name(window_id, "workspace:switch_to_previous_project")
+        });
+
+        assert!(handled.expect("binding dispatch failed"));
+        workspace.read(&app, |workspace, _| {
+            assert_eq!(workspace.active_project().root, home)
         });
     });
 }
