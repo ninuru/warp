@@ -17,7 +17,7 @@ use warpui::SingletonEntity as _;
 
 #[cfg(unix)]
 use super::ensure_peer_uid;
-use super::resolver::validate_action_target;
+use super::resolver::{tab_index_from_target, validate_action_target};
 use super::{
     ControlServerState, LocalControlBridge, LocalControlServer, MAX_ACTIVE_CREDENTIALS,
     capabilities, ensure_feature_enabled, ensure_protocol_version, ensure_settings_allow_action,
@@ -27,6 +27,7 @@ use super::{
     validate_tab_create_target,
 };
 use crate::settings::{LocalControlMode, LocalControlModeSetting, LocalControlSettings};
+use crate::workspace::view::tests::{initialize_app, mock_workspace};
 
 fn settings_with_mode(mode: LocalControlMode) -> LocalControlSettings {
     LocalControlSettings {
@@ -438,5 +439,39 @@ fn disabling_scripting_invalidates_existing_grant_and_prevents_new_grants() {
             .await
             .expect_err("disabled scripting should prevent new grants");
         assert_eq!(err.code, ErrorCode::LocalControlDisabled);
+    });
+}
+
+#[test]
+fn tab_id_of_hidden_project_tab_is_stale() {
+    let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
+    warpui::App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let workspace = mock_workspace(&mut app);
+        let temp_root = tempfile::TempDir::new().expect("failed to create temp dir");
+
+        workspace.update(&mut app, |workspace, ctx| {
+            let hidden_id = workspace.tabs[0].pane_group.id();
+            workspace.switch_to_project(temp_root.path().to_path_buf(), ctx);
+            let visible_id = workspace.tabs[0].pane_group.id();
+
+            let target_for = |id: warpui::EntityId| TargetSelector {
+                window: None,
+                tab: Some(TabTarget::Id {
+                    id: TabSelector(id.to_string()),
+                }),
+                pane: None,
+                session: None,
+            };
+
+            let err = tab_index_from_target(&target_for(hidden_id), workspace, ctx)
+                .expect_err("hidden tab is not addressable");
+            assert_eq!(err.code, ErrorCode::StaleTarget);
+            assert_eq!(
+                tab_index_from_target(&target_for(visible_id), workspace, ctx)
+                    .expect("visible tab resolves"),
+                0
+            );
+        });
     });
 }

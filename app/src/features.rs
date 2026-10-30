@@ -45,6 +45,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::RunGeneratorsWithCmdExe,
         #[cfg(feature = "prefix_keys")]
         FeatureFlag::PrefixKeys,
+        #[cfg(feature = "project_sessions")]
+        FeatureFlag::ProjectSessions,
         #[cfg(feature = "ligatures")]
         FeatureFlag::Ligatures,
         #[cfg(feature = "selectable_prompt")]
