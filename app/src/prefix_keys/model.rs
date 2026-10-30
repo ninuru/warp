@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use settings::Setting as _;
 use warpui::r#async::Timer;
+use warpui::keymap::Keystroke;
 use warpui::{AppContext, Entity, Event, ModelContext, SingletonEntity, WindowId};
 
 use super::config::PrefixKeymap;
@@ -9,10 +10,7 @@ use super::machine::{KeyInput, PrefixMachine, PrefixOutcome};
 use crate::terminal::keys_settings::KeysSettings;
 
 pub enum PrefixKeysEvent {
-    PendingChanged {
-        #[cfg_attr(not(test), expect(dead_code))]
-        window_id: WindowId,
-    },
+    PendingChanged { window_id: WindowId },
 }
 
 pub struct PrefixKeysState {
@@ -57,6 +55,16 @@ impl PrefixKeysState {
             ctx.emit(PrefixKeysEvent::PendingChanged { window_id });
         }
         outcome
+    }
+
+    pub fn is_pending(&self, window_id: WindowId) -> bool {
+        self.machines
+            .get(&window_id)
+            .is_some_and(PrefixMachine::is_pending)
+    }
+
+    pub fn prefix_key(&self) -> &Keystroke {
+        self.keymap.prefix()
     }
 
     fn schedule_timeout(

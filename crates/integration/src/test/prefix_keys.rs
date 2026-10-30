@@ -18,6 +18,9 @@ use super::new_builder;
 use crate::Builder;
 
 const PAST_PREFIX_TIMEOUT: Duration = Duration::from_millis(1700);
+const CHIP_RENDER_PAUSE: Duration = Duration::from_millis(300);
+const PREFIX_CHIP_SCREENSHOT: &str = "prefix-chip.png";
+const PREFIX_CHIP_CANCELLED_SCREENSHOT: &str = "prefix-chip-cancelled.png";
 
 fn ctrl_a() -> Event {
     Event::KeyDown {
@@ -47,6 +50,24 @@ fn assert_output_has_single_ctrl_a(app: &mut App, window_id: WindowId) -> Assert
             "Expected `cat -v` to print exactly one ^A per line, but output was: {output:?}"
         )
     })
+}
+
+pub fn test_prefix_pending_indicator() -> Builder {
+    prefix_builder()
+        .with_real_display()
+        .with_step(
+            new_step_with_default_assertions("ctrl-a shows the ^A pending chip")
+                .with_event(ctrl_a())
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot(PREFIX_CHIP_SCREENSHOT),
+        )
+        .with_step(
+            new_step_with_default_assertions("escape hides the pending chip")
+                .with_keystrokes(&["escape"])
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot(PREFIX_CHIP_CANCELLED_SCREENSHOT)
+                .add_named_assertion("workspace still has one tab", assert_tab_count(1)),
+        )
 }
 
 pub fn test_prefix_new_tab() -> Builder {
