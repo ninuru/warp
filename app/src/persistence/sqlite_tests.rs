@@ -18,7 +18,8 @@ use super::{
 };
 use crate::app_state::{
     AppState, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents, LeafSnapshot, PaneNodeSnapshot,
-    TabGroupSnapshot, TabSnapshot, TerminalPaneSnapshot, WindowSnapshot,
+    ProjectSnapshot, TabGroupSnapshot, TabSnapshot, TerminalPaneSnapshot, WindowProjectsSnapshot,
+    WindowSnapshot,
 };
 use crate::auth::UserUid;
 use crate::cloud_object::{CloudObjectPermissions, Owner};
@@ -35,6 +36,7 @@ use crate::terminal::model::block::SerializedBlock;
 use crate::terminal::model::session::SessionId;
 use crate::themes::theme::AnsiColorIdentifier;
 use crate::workspace::tab_group::TabGroupId;
+use crate::workspace::view::projects::ProjectRef;
 use crate::workspaces::team::{MembershipRole, Team, TeamMember};
 use crate::workspaces::user_profiles::UserProfileWithUID;
 use crate::workspaces::workspace::Workspace;
@@ -418,6 +420,7 @@ fn test_terminal_window_snapshot(vertical_tabs_panel_open: bool) -> WindowSnapsh
         right_panel_width: None,
         agent_management_filters: None,
         tab_groups: vec![],
+        projects: None,
     }
 }
 
@@ -533,6 +536,7 @@ fn test_sqlite_round_trips_custom_vertical_tabs_title() {
             right_panel_width: None,
             agent_management_filters: None,
             tab_groups: vec![],
+            projects: None,
         }],
         active_window_index: Some(0),
         block_lists: Default::default(),
@@ -612,6 +616,7 @@ fn test_sqlite_round_trips_code_pane_with_multiple_tabs() {
             right_panel_width: None,
             agent_management_filters: None,
             tab_groups: vec![],
+            projects: None,
         }],
         active_window_index: Some(0),
         block_lists: Default::default(),
@@ -737,6 +742,7 @@ fn test_sqlite_round_trips_tab_groups() {
                 collapsed: true,
                 pinned: false,
             }],
+            projects: None,
         }],
         active_window_index: Some(0),
         block_lists: Default::default(),
@@ -898,6 +904,7 @@ fn test_sqlite_round_trips_pinned_state() {
                     pinned: false,
                 },
             ],
+            projects: None,
         }],
         active_window_index: Some(0),
         block_lists: Default::default(),
@@ -1158,4 +1165,170 @@ fn team_member_is_disabled_round_trips_through_sqlite_cache() {
         .expect("disabled member should be present");
     assert!(!active_member.is_disabled);
     assert!(disabled_member.is_disabled);
+}
+
+fn project_terminal_tab(uuid: u8, cwd: &str, group_id: Option<TabGroupId>) -> TabSnapshot {
+    TabSnapshot {
+        custom_title: Some(cwd.to_string()),
+        root: PaneNodeSnapshot::Leaf(LeafSnapshot {
+            is_focused: true,
+            custom_vertical_tabs_title: None,
+            contents: LeafContents::Terminal(TerminalPaneSnapshot {
+                uuid: vec![uuid],
+                cwd: Some(cwd.to_string()),
+                shell_launch_data: None,
+                is_active: true,
+                is_read_only: false,
+                input_config: None,
+                llm_model_override: None,
+                active_profile_id: None,
+                conversation_ids_to_restore: vec![],
+                active_conversation_id: None,
+            }),
+        }),
+        default_directory_color: None,
+        selected_color: SelectedTabColor::default(),
+        left_panel: None,
+        right_panel: None,
+        group_id,
+        pinned: false,
+    }
+}
+
+fn tab_cwds(tabs: &[TabSnapshot]) -> Vec<Option<String>> {
+    tabs.iter()
+        .map(|tab| match &tab.root {
+            PaneNodeSnapshot::Leaf(LeafSnapshot {
+                contents: LeafContents::Terminal(terminal),
+                ..
+            }) => terminal.cwd.clone(),
+            PaneNodeSnapshot::Leaf(_) | PaneNodeSnapshot::Branch(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn test_sqlite_round_trips_window_projects() {
+    let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    let group_id = TabGroupId::new();
+    let mut window = test_terminal_window_snapshot(false);
+    window.tabs = vec![
+        project_terminal_tab(1, "/work/api", None),
+        project_terminal_tab(2, "/work/api/src", None),
+    ];
+    window.active_tab_index = 1;
+    window.projects = Some(WindowProjectsSnapshot {
+        active: ProjectRef::for_root(PathBuf::from("/work/api")),
+        previous: Some(PathBuf::from("/work/web")),
+        hidden: vec![
+            ProjectSnapshot {
+                root: PathBuf::from("/work/web"),
+                name: "web".to_string(),
+                tabs: vec![
+                    project_terminal_tab(3, "/work/web", Some(group_id)),
+                    project_terminal_tab(4, "/work/web/ui", None),
+                ],
+                tab_groups: vec![TabGroupSnapshot {
+                    id: group_id,
+                    name: Some("Frontend".to_string()),
+                    color: SelectedTabColor::Color(AnsiColorIdentifier::Green),
+                    collapsed: false,
+                    pinned: false,
+                }],
+                active_tab_index: 1,
+            },
+            ProjectSnapshot {
+                root: PathBuf::from("/work/docs"),
+                name: "docs".to_string(),
+                tabs: vec![project_terminal_tab(5, "/work/docs", None)],
+                tab_groups: vec![],
+                active_tab_index: 0,
+            },
+        ],
+    });
+    let app_state = AppState {
+        windows: vec![window],
+        active_window_index: Some(0),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+
+    let restored = read_sqlite_data(&mut conn, None, PersistedDataScope::Full)
+        .expect("app state should load")
+        .app_state
+        .expect("app state should be present for the full scope");
+
+    let restored_window = &restored.windows[0];
+    assert_eq!(
+        tab_cwds(&restored_window.tabs),
+        vec![
+            Some("/work/api".to_string()),
+            Some("/work/api/src".to_string())
+        ]
+    );
+    assert_eq!(restored_window.active_tab_index, 1);
+    assert!(restored_window.tab_groups.is_empty());
+
+    let projects = restored_window
+        .projects
+        .as_ref()
+        .expect("projects should be restored");
+    assert_eq!(
+        projects.active,
+        ProjectRef::for_root(PathBuf::from("/work/api"))
+    );
+    assert_eq!(projects.previous, Some(PathBuf::from("/work/web")));
+    assert_eq!(projects.hidden.len(), 2);
+
+    let web = &projects.hidden[0];
+    assert_eq!(web.root, PathBuf::from("/work/web"));
+    assert_eq!(web.name, "web");
+    assert_eq!(web.active_tab_index, 1);
+    assert_eq!(
+        tab_cwds(&web.tabs),
+        vec![
+            Some("/work/web".to_string()),
+            Some("/work/web/ui".to_string())
+        ]
+    );
+    assert_eq!(web.tab_groups.len(), 1);
+    assert_eq!(web.tab_groups[0].name.as_deref(), Some("Frontend"));
+    assert_eq!(web.tabs[0].group_id, Some(web.tab_groups[0].id));
+    assert_eq!(web.tabs[1].group_id, None);
+
+    let docs = &projects.hidden[1];
+    assert_eq!(docs.root, PathBuf::from("/work/docs"));
+    assert_eq!(tab_cwds(&docs.tabs), vec![Some("/work/docs".to_string())]);
+    assert!(docs.tab_groups.is_empty());
+}
+
+#[test]
+fn test_sqlite_loads_windows_without_projects_as_visible_tabs() {
+    let _projects_guard = FeatureFlag::ProjectSessions.override_enabled(true);
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    let app_state = AppState {
+        windows: vec![test_terminal_window_snapshot(false)],
+        active_window_index: Some(0),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+
+    let restored = read_sqlite_data(&mut conn, None, PersistedDataScope::Full)
+        .expect("app state should load")
+        .app_state
+        .expect("app state should be present for the full scope");
+
+    assert_eq!(restored.windows[0].projects, None);
+    assert_eq!(restored.windows[0].tabs.len(), 1);
 }
