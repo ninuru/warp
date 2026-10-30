@@ -24724,6 +24724,14 @@ impl TypedActionView for Workspace {
                 mode: palette_mode,
                 source,
             } => self.toggle_palette(*palette_mode, *source, ctx),
+            OpenProjectPicker => self.open_palette_action(
+                PaletteMode::ProjectSessions,
+                PaletteSource::Keybinding,
+                None,
+                ctx,
+            ),
+            SwitchToPreviousProject => self.switch_to_previous_project(ctx),
+            SwitchProject { path } => self.switch_to_project(path.clone(), ctx),
             ShowUpgrade => {
                 send_telemetry_from_ctx!(TelemetryEvent::UserMenuUpgradeClicked, ctx);
 
