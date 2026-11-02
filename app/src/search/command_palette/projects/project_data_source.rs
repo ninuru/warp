@@ -98,15 +98,21 @@ impl ProjectDataSource {
         &mut self,
         open: Vec<ProjectRef>,
         active: PathBuf,
+        open_only: bool,
         ctx: &mut ModelContext<Self>,
     ) {
         let home = dirs::home_dir().unwrap_or_default();
-        let roots = TabSettings::as_ref(ctx)
-            .project_roots
-            .iter()
-            .map(|raw| expand_root(raw, &home))
-            .collect_vec();
-        self.candidates = merge_candidates(&open, &active, scan_roots(&roots), &home);
+        let scanned = if open_only {
+            Vec::new()
+        } else {
+            let roots = TabSettings::as_ref(ctx)
+                .project_roots
+                .iter()
+                .map(|raw| expand_root(raw, &home))
+                .collect_vec();
+            scan_roots(&roots)
+        };
+        self.candidates = merge_candidates(&open, &active, scanned, &home);
     }
 }
 

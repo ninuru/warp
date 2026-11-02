@@ -96,7 +96,11 @@ pub(crate) fn project_bindings() -> [EditableBinding; 4] {
         EditableBinding::new(
             "workspace:list_open_projects",
             "List open projects",
-            WorkspaceAction::OpenProjectPicker,
+            WorkspaceAction::OpenPalette {
+                mode: PaletteMode::OpenProjectSessions,
+                source: PaletteSource::Keybinding,
+                query: None,
+            },
         )
         .with_context_predicate(id!("Workspace"))
         .with_group(bindings::BindingGroup::Navigation.as_str())

@@ -412,6 +412,10 @@ impl View {
                 | (PaletteMode::Conversations, QueryFilter::Conversations)
                 | (PaletteMode::WarpDrive, QueryFilter::Drive)
                 | (PaletteMode::ProjectSessions, QueryFilter::ProjectSessions)
+                | (
+                    PaletteMode::OpenProjectSessions,
+                    QueryFilter::ProjectSessions
+                )
         )
     }
 

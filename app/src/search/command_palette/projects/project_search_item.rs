@@ -2,7 +2,8 @@ use fuzzy_match::FuzzyMatchResult;
 use ordered_float::OrderedFloat;
 use warp_core::ui::theme::Fill;
 use warpui::elements::{
-    Align, ConstrainedBox, Container, Flex, Highlight, ParentElement, Shrinkable, Text,
+    Align, ConstrainedBox, Container, CrossAxisAlignment, Flex, Highlight, ParentElement,
+    Shrinkable, Text,
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::{AppContext, Element, SingletonEntity};
@@ -73,7 +74,7 @@ impl ProjectSearchItem {
             .with_margin_left(LABEL_SPACING)
             .finish();
 
-        let mut row = Flex::row();
+        let mut row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
         row.add_child(name);
         row.add_child(Shrinkable::new(1., Align::new(path).left().finish()).finish());
         if self.candidate.is_open {

@@ -177,10 +177,12 @@ impl DataSourceStore {
         &self,
         open: Vec<ProjectRef>,
         active: PathBuf,
+        open_only: bool,
         ctx: &mut ModelContext<Self>,
     ) {
-        self.project_data_source
-            .update(ctx, |source, ctx| source.refresh(open, active, ctx));
+        self.project_data_source.update(ctx, |source, ctx| {
+            source.refresh(open, active, open_only, ctx)
+        });
     }
 
     /// Resets the [`CommandPaletteMixer`] to the set of data sources relevant for the Ctrl+Tab

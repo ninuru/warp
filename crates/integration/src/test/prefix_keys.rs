@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use warp::features::FeatureFlag;
@@ -8,8 +9,12 @@ use warp::integration_testing::terminal::{
     execute_command_successfully, execute_long_running_command,
     wait_until_bootstrapped_single_pane_for_tab,
 };
-use warp::integration_testing::view_getters::single_terminal_view_for_tab;
+use warp::integration_testing::view_getters::{
+    command_palette_view, single_terminal_view_for_tab, workspace_view,
+};
 use warp::integration_testing::workspace::{assert_focused_tab_index, assert_tab_count};
+use warp::search::command_palette::mixer::CommandPaletteItemAction;
+use warp::workspace::WorkspaceAction;
 use warpui_core::event::KeyEventDetails;
 use warpui_core::integration::{AssertionCallback, AssertionOutcome, TestStep};
 use warpui_core::keymap::Keystroke;
@@ -473,4 +478,101 @@ pub fn test_copy_mode_cursor_screenshot() -> Builder {
                 .with_keystrokes(&["q", "q"])
                 .add_named_assertion("alt screen is gone", assert_alt_grid_active(0, 0, false)),
         )
+}
+
+fn project_picker_paths(app: &App, window_id: WindowId) -> Vec<PathBuf> {
+    command_palette_view(app, window_id).read(app, |palette, ctx| {
+        palette
+            .search_results(ctx)
+            .filter_map(|result| match result.accept_result() {
+                CommandPaletteItemAction::SwitchProject { path } => Some(path),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+pub fn test_prefix_lists_only_open_projects() -> Builder {
+    FeatureFlag::ProjectSessions.set_enabled(true);
+    prefix_builder()
+        // The harness only isolates HOME on Unix.
+        .set_should_run_test(|| cfg!(unix))
+        .with_setup(|utils| {
+            for name in ["Nominet", "DNSBelgium", "Unopened"] {
+                std::fs::create_dir_all(utils.test_dir().join("projects").join(name))
+                    .expect("create project fixture");
+            }
+        })
+        .with_step(
+            new_step_with_default_assertions("open two project sessions").with_action(
+                |app, window_id, _| {
+                    let workspace = workspace_view(app, window_id);
+                    for name in ["Nominet", "DNSBelgium"] {
+                        app.update(|ctx| {
+                            ctx.dispatch_typed_action_for_view(
+                                window_id,
+                                workspace.id(),
+                                &WorkspaceAction::SwitchProject {
+                                    path: PathBuf::from(
+                                        std::env::var_os("HOME").expect("test home"),
+                                    )
+                                    .join("projects")
+                                    .join(name),
+                                },
+                            );
+                        });
+                    }
+                },
+            ),
+        )
+        .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
+        .with_step(
+            TestStep::new("ctrl-a s lists only other open sessions")
+                .set_timeout(Duration::from_secs(15))
+                .with_event(ctrl_a())
+                .with_keystrokes(&["s"])
+                .add_assertion(|app, window_id| {
+                    let home = PathBuf::from(std::env::var_os("HOME").expect("test home"));
+                    let paths = project_picker_paths(app, window_id);
+                    async_assert!(
+                        paths == vec![home.join("projects/Nominet"), home],
+                        "Expected only open sessions, got {paths:?}"
+                    )
+                })
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("open-project-sessions.png"),
+        )
+        .with_step(
+            TestStep::new("ctrl-a f still discovers unopened projects")
+                .with_keystrokes(&["escape"])
+                .with_event(ctrl_a())
+                .with_keystrokes(&["f"])
+                .add_assertion(|app, window_id| {
+                    let unopened = PathBuf::from(std::env::var_os("HOME").expect("test home"))
+                        .join("projects/Unopened");
+                    let paths = project_picker_paths(app, window_id);
+                    async_assert!(
+                        paths.contains(&unopened),
+                        "Discovery should include {unopened:?}, got {paths:?}"
+                    )
+                }),
+        )
+        .with_step(
+            TestStep::new("ctrl-a s resets discovery and switches to an open session")
+                .with_keystrokes(&["escape"])
+                .with_event(ctrl_a())
+                .with_keystrokes(&["s"])
+                .add_assertion(|app, window_id| {
+                    let home = PathBuf::from(std::env::var_os("HOME").expect("test home"));
+                    let paths = project_picker_paths(app, window_id);
+                    async_assert!(
+                        paths == vec![home.join("projects/Nominet"), home],
+                        "Expected only open sessions, got {paths:?}"
+                    )
+                }),
+        )
+        .with_step(TestStep::new("select the open project").with_keystrokes(&["enter"]))
+        .with_step(execute_command_successfully(
+            r#"test "$PWD" = "$HOME/projects/Nominet""#,
+        ))
 }
