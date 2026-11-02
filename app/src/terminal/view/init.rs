@@ -34,6 +34,7 @@ use crate::terminal::view::{
 };
 use crate::util::bindings;
 use crate::util::bindings::{CustomAction, cmd_or_ctrl_shift, is_binding_pty_compliant};
+use crate::view_components::find::FindDirection;
 
 pub const TOGGLE_BLOCK_FILTER_KEYBINDING: &str =
     "terminal:toggle_block_filter_on_selected_or_last_block";
@@ -438,6 +439,31 @@ pub fn init(app: &mut AppContext) {
         ),
         FixedBinding::new("o", TerminalAction::CopyModeSwapAnchor, copy_mode.clone()),
         FixedBinding::new("y", TerminalAction::CopyModeYank, copy_mode.clone()),
+        FixedBinding::new(
+            "/",
+            TerminalAction::CopyModeSearch(FindDirection::Down),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "shift-?",
+            TerminalAction::CopyModeSearch(FindDirection::Up),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "?",
+            TerminalAction::CopyModeSearch(FindDirection::Up),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "n",
+            TerminalAction::CopyModeSearchNext { reverse: false },
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "shift-N",
+            TerminalAction::CopyModeSearchNext { reverse: true },
+            copy_mode.clone(),
+        ),
         FixedBinding::new("q", TerminalAction::ExitCopyMode, copy_mode.clone()),
         FixedBinding::new("escape", TerminalAction::ExitCopyMode, copy_mode),
     ]);

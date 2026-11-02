@@ -9,6 +9,7 @@ use warpui::units::{IntoLines as _, Lines};
 
 use super::{BlockList, BlockListPoint};
 use crate::terminal::GridType;
+use crate::terminal::find::{BlockGridMatch, BlockListMatch};
 use crate::terminal::model::cell::Flags;
 use crate::terminal::model::grid::Dimensions;
 use crate::terminal::model::index::{Point, Side};
@@ -234,6 +235,27 @@ impl BlockList {
             .unwrap_or(state.cursor);
         self.set_copy_mode(CopyModeState { cursor, ..state }, inverted_blocklist);
         self.copy_mode
+    }
+
+    pub fn copy_mode_match_point(
+        &self,
+        original_match: &BlockListMatch,
+    ) -> Option<WithinBlock<Point>> {
+        match original_match {
+            BlockListMatch::CommandBlock(BlockGridMatch {
+                grid_type,
+                range,
+                block_index,
+                ..
+            }) => {
+                let grid = self.block_at(*block_index)?.grid_of_type(*grid_type)?;
+                let point = grid
+                    .grid_handler()
+                    .maybe_translate_point_from_original_to_displayed(*range.start());
+                self.clamp_copy_mode_point(WithinBlock::new(point, *block_index, *grid_type))
+            }
+            BlockListMatch::RichContent { .. } => None,
+        }
     }
 
     pub fn copy_mode_toggle_visual(

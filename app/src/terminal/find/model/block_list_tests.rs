@@ -9,7 +9,7 @@ use crate::terminal::find::BlockGridMatch;
 use crate::terminal::find::model::FindOptions;
 use crate::terminal::find::model::block_list::run_find_on_block_list;
 use crate::terminal::model::index::Point;
-use crate::terminal::model::terminal_model::{BlockIndex, BlockSortDirection};
+use crate::terminal::model::terminal_model::{BlockIndex, BlockSortDirection, WithinBlock};
 use crate::terminal::{GridType, TerminalModel};
 use crate::view_components::find::FindDirection;
 
@@ -487,6 +487,119 @@ fn test_rerun_on_block_preserves_focused_match_in_older_block() {
             run.focused_match_index(),
             ui_index_before,
             "UI index should change when new matches are inserted before the focused match"
+        );
+    });
+}
+
+fn bar_find_options() -> FindOptions {
+    FindOptions {
+        query: Some("bar".to_owned().into()),
+        is_regex_enabled: false,
+        is_case_sensitive: false,
+        ..Default::default()
+    }
+}
+
+fn jump_copy_mode_cursor(
+    run: &BlockListFindRun,
+    terminal_model: &mut TerminalModel,
+) -> WithinBlock<Point> {
+    let focused_match = run.focused_match().expect("a match should be focused");
+    let target = terminal_model
+        .block_list()
+        .copy_mode_match_point(focused_match);
+    terminal_model
+        .block_list_mut()
+        .copy_mode_move_to(target, false)
+        .expect("copy mode should stay active")
+        .cursor
+}
+
+#[test]
+fn copy_mode_search_steps_cursor_through_find_matches() {
+    App::test((), |mut app| async move {
+        let mut mock_terminal_model = TerminalModel::mock(None, None);
+        mock_terminal_model.simulate_block("ls", "foo bar\r\nbar baz\r\n");
+        mock_terminal_model.simulate_block("ls", "qux bar\r\n");
+
+        let mut run = app.update(|ctx| {
+            run_find_on_block_list(
+                bar_find_options(),
+                mock_terminal_model.block_list(),
+                &HashMap::new(),
+                BlockSortDirection::MostRecentLast,
+                ctx,
+            )
+        });
+        mock_terminal_model
+            .block_list_mut()
+            .enter_copy_mode(false)
+            .expect("copy mode should start");
+
+        let output_point = |block_index: usize, row: usize, col: usize| {
+            WithinBlock::new(Point::new(row, col), block_index.into(), GridType::Output)
+        };
+
+        assert_eq!(
+            jump_copy_mode_cursor(&run, &mut mock_terminal_model),
+            output_point(2, 0, 4)
+        );
+
+        run.focus_next_match(FindDirection::Down, BlockSortDirection::MostRecentLast);
+        assert_eq!(
+            jump_copy_mode_cursor(&run, &mut mock_terminal_model),
+            output_point(1, 0, 4)
+        );
+
+        run.focus_next_match(FindDirection::Down, BlockSortDirection::MostRecentLast);
+        assert_eq!(
+            jump_copy_mode_cursor(&run, &mut mock_terminal_model),
+            output_point(1, 1, 0)
+        );
+
+        run.focus_next_match(FindDirection::Up, BlockSortDirection::MostRecentLast);
+        assert_eq!(
+            jump_copy_mode_cursor(&run, &mut mock_terminal_model),
+            output_point(1, 0, 4)
+        );
+    });
+}
+
+#[test]
+fn copy_mode_search_maps_filtered_match_to_displayed_row() {
+    App::test((), |mut app| async move {
+        let mut mock_terminal_model = TerminalModel::mock(None, None);
+        mock_terminal_model.simulate_block("ls", "bar baz\r\nbar bat\r\nbar baz\r\n");
+        mock_terminal_model
+            .update_filter_on_block(1.into(), BlockFilterQuery::new_for_test("bat".to_owned()));
+
+        let mut run = app.update(|ctx| {
+            run_find_on_block_list(
+                bar_find_options(),
+                mock_terminal_model.block_list(),
+                &HashMap::new(),
+                BlockSortDirection::MostRecentLast,
+                ctx,
+            )
+        });
+        mock_terminal_model
+            .block_list_mut()
+            .enter_copy_mode(false)
+            .expect("copy mode should start");
+
+        run.focus_next_match(FindDirection::Up, BlockSortDirection::MostRecentLast);
+        assert_eq!(
+            run.focused_match(),
+            Some(&BlockListMatch::CommandBlock(BlockGridMatch {
+                grid_type: GridType::Output,
+                range: Point { row: 1, col: 0 }..=Point { row: 1, col: 2 },
+                block_index: 1.into(),
+                is_filtered: false,
+            }))
+        );
+        assert_eq!(
+            jump_copy_mode_cursor(&run, &mut mock_terminal_model),
+            WithinBlock::new(Point::new(0, 0), 1.into(), GridType::Output)
         );
     });
 }
