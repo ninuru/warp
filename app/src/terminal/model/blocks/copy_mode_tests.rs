@@ -765,13 +765,16 @@ fn yank(blocks: &BlockList, ctx: &AppContext) -> String {
         .expect("selection should have text")
 }
 
-fn toggle_visual(blocks: &mut BlockList, selection_type: SelectionType) -> CopyModeState {
+fn toggle_visual(
+    blocks: &mut BlockList,
+    selection_type: SelectionType,
+) -> CopyModeState<WithinBlock<Point>> {
     blocks
         .copy_mode_toggle_visual(selection_type, false)
         .expect("copy mode should stay active")
 }
 
-fn swap_anchor(blocks: &mut BlockList) -> CopyModeState {
+fn swap_anchor(blocks: &mut BlockList) -> CopyModeState<WithinBlock<Point>> {
     blocks
         .copy_mode_swap_anchor(false)
         .expect("copy mode should stay active")

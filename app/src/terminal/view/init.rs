@@ -305,9 +305,7 @@ pub fn init(app: &mut AppContext) {
         "Enter copy mode",
         TerminalAction::EnterCopyMode,
     )
-    .with_context_predicate(
-        id!("Terminal") & id!("TerminalView_NonEmptyBlockList") & !id!("AltScreen"),
-    )
+    .with_context_predicate(id!("Terminal") & id!("TerminalView_NonEmptyBlockList"))
     .with_enabled(|| FeatureFlag::PrefixKeys.is_enabled())]);
 
     let copy_mode = id!("Terminal") & id!("CopyMode");

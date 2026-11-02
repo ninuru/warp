@@ -1,3 +1,5 @@
+mod copy_mode;
+
 use std::collections::HashMap;
 use std::io;
 use std::ops::{Range, RangeInclusive};
@@ -14,6 +16,7 @@ use warp_terminal::model::{KeyboardModes, KeyboardModesApplyBehavior};
 use warpui::text::SelectionType;
 use warpui::units::Lines;
 
+use super::copy_mode::CopyModeState;
 use super::find::RegexDFAs;
 use super::grid::RespectDisplayedOutput;
 use super::image_map::StoredImageMetadata;
@@ -53,6 +56,7 @@ pub struct AltScreen {
     /// allow double-click selection to work on the TerminalView::highlighted_link even when it
     /// contains spaces. Smart-select never traverses across whitespace.
     smart_select_override: Option<RangeInclusive<Point>>,
+    copy_mode: Option<CopyModeState<Point>>,
 
     /// 'Sampler' that samples background color of output grid cells as the alt screen is rendered.
     ///
@@ -87,6 +91,7 @@ impl AltScreen {
             pending_lines_to_scroll: Lines::zero(),
             selection: None,
             smart_select_override: None,
+            copy_mode: None,
             bg_color_sampler: Arc::new(Mutex::new(ColorSampler::new())),
             event_proxy,
         }
@@ -207,6 +212,7 @@ impl AltScreen {
     }
 
     pub fn start_selection(&mut self, point: Point, selection_type: SelectionType, side: Side) {
+        self.copy_mode = None;
         let mut selection = Selection::new(selection_type, point, side);
         selection.set_smart_select_side(Direction::Left);
 
@@ -244,6 +250,7 @@ impl AltScreen {
 
     pub fn clear_selection(&mut self) {
         self.selection = None;
+        self.copy_mode = None;
         self.event_proxy
             .send_app_event(TerminalEvent::TextSelectionChanged);
     }
@@ -358,6 +365,7 @@ impl AltScreen {
                 self.grid_storage().columns(),
             )
         });
+        self.rotate_copy_mode(delta);
     }
 
     fn ansi_handler(&mut self) -> &mut (impl ansi::Handler + use<>) {

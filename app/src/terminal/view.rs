@@ -9779,6 +9779,9 @@ impl TerminalView {
     }
 
     fn control_sequence_on_terminal(&mut self, bytes: &[u8], ctx: &mut ViewContext<Self>) {
+        if self.is_in_copy_mode() {
+            return;
+        }
         if self.is_long_running() {
             self.write_user_bytes_to_pty(bytes.to_owned(), ctx);
         } else {
@@ -20652,7 +20655,7 @@ impl TerminalView {
         }
         self.find_bar.update(ctx, |view, ctx| {
             let semantic_selection = SemanticSelection::as_ref(ctx);
-            if model.block_list().copy_mode().is_none()
+            if !model.is_in_copy_mode()
                 && let Some(selected) =
                     model.selection_to_string(semantic_selection, inverted_blocklist, ctx)
                 && !selected.is_empty()
@@ -21285,7 +21288,9 @@ impl TerminalView {
         // This also explains why we don't invoke this function unless we're attempting to clear
         // **all** selected text; because rich content text copying will stop working otherwise.
         if exempt_rich_content_view_id.is_none() {
-            self.model.lock().block_list_mut().clear_selection();
+            let mut model = self.model.lock();
+            model.block_list_mut().clear_selection();
+            model.alt_screen_mut().exit_copy_mode();
         }
 
         // Clear all selected text within CLI subagent views,
@@ -22158,7 +22163,7 @@ impl TerminalView {
                 && (are_blocks_selected || is_text_selected)
                 && selection_holds_focus;
 
-            block_list.copy_mode().is_some()
+            model.is_in_copy_mode()
                 || has_active_user_terminal_command
                 || has_block_or_text_selection_in_shell_mode
         };
@@ -23958,22 +23963,24 @@ impl TerminalView {
     }
 
     fn is_in_copy_mode(&self) -> bool {
-        self.model.lock().block_list().copy_mode().is_some()
+        self.model.lock().is_in_copy_mode()
     }
 
     fn enter_copy_mode(&mut self, ctx: &mut ViewContext<Self>) {
-        if !FeatureFlag::PrefixKeys.is_enabled() || self.model.lock().is_alt_screen_active() {
+        if !FeatureFlag::PrefixKeys.is_enabled() {
             return;
         }
         self.clear_selected_blocks(ctx);
         self.clear_selected_text(ctx);
         let inverted = self.is_inverted_blocklist(ctx);
-        let entered = self
-            .model
-            .lock()
-            .block_list_mut()
-            .enter_copy_mode(inverted)
-            .is_some();
+        let entered = {
+            let mut model = self.model.lock();
+            if model.is_alt_screen_active() {
+                model.alt_screen_mut().enter_copy_mode().is_some()
+            } else {
+                model.block_list_mut().enter_copy_mode(inverted).is_some()
+            }
+        };
         if !entered {
             return;
         }
@@ -23986,22 +23993,29 @@ impl TerminalView {
         let input_mode = *InputModeSettings::as_ref(ctx).input_mode.value();
         let moved = {
             let mut model = self.model.lock();
-            let target = {
-                let viewport = self.viewport_state(model.block_list(), input_mode, ctx);
-                let scroll_top = viewport.scroll_top_in_lines();
-                let copy_mode_viewport = CopyModeViewport {
-                    top: scroll_top + viewport.snackbar_header_height(),
-                    bottom: scroll_top + self.content_element_height_lines(ctx) - 1.0.into_lines(),
-                    visual_row: |row| viewport.block_list_y_to_scroll_y(row),
+            if model.is_alt_screen_active() {
+                let alt_screen = model.alt_screen_mut();
+                let target = alt_screen.copy_mode_target(motion);
+                alt_screen.copy_mode_move_to(target).is_some()
+            } else {
+                let target = {
+                    let viewport = self.viewport_state(model.block_list(), input_mode, ctx);
+                    let scroll_top = viewport.scroll_top_in_lines();
+                    let copy_mode_viewport = CopyModeViewport {
+                        top: scroll_top + viewport.snackbar_header_height(),
+                        bottom: scroll_top + self.content_element_height_lines(ctx)
+                            - 1.0.into_lines(),
+                        visual_row: |row| viewport.block_list_y_to_scroll_y(row),
+                    };
+                    model
+                        .block_list()
+                        .copy_mode_target(motion, inverted, &copy_mode_viewport)
                 };
                 model
-                    .block_list()
-                    .copy_mode_target(motion, inverted, &copy_mode_viewport)
-            };
-            model
-                .block_list_mut()
-                .copy_mode_move_to(target, inverted)
-                .is_some()
+                    .block_list_mut()
+                    .copy_mode_move_to(target, inverted)
+                    .is_some()
+            }
         };
         if !moved {
             self.redetermine_global_focus(ctx);
@@ -24016,12 +24030,20 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         let inverted = self.is_inverted_blocklist(ctx);
-        let toggled = self
-            .model
-            .lock()
-            .block_list_mut()
-            .copy_mode_toggle_visual(selection_type, inverted)
-            .is_some();
+        let toggled = {
+            let mut model = self.model.lock();
+            if model.is_alt_screen_active() {
+                model
+                    .alt_screen_mut()
+                    .copy_mode_toggle_visual(selection_type)
+                    .is_some()
+            } else {
+                model
+                    .block_list_mut()
+                    .copy_mode_toggle_visual(selection_type, inverted)
+                    .is_some()
+            }
+        };
         if !toggled {
             self.redetermine_global_focus(ctx);
         }
@@ -24030,12 +24052,17 @@ impl TerminalView {
 
     fn copy_mode_swap_anchor(&mut self, ctx: &mut ViewContext<Self>) {
         let inverted = self.is_inverted_blocklist(ctx);
-        let swapped = self
-            .model
-            .lock()
-            .block_list_mut()
-            .copy_mode_swap_anchor(inverted)
-            .is_some();
+        let swapped = {
+            let mut model = self.model.lock();
+            if model.is_alt_screen_active() {
+                model.alt_screen_mut().copy_mode_swap_anchor().is_some()
+            } else {
+                model
+                    .block_list_mut()
+                    .copy_mode_swap_anchor(inverted)
+                    .is_some()
+            }
+        };
         if !swapped {
             self.redetermine_global_focus(ctx);
         }
@@ -24044,22 +24071,29 @@ impl TerminalView {
     }
 
     fn copy_mode_yank(&mut self, ctx: &mut ViewContext<Self>) {
-        let has_anchor = self
-            .model
-            .lock()
-            .block_list()
-            .copy_mode()
-            .is_some_and(|state| state.anchor.is_some());
+        let has_anchor = {
+            let model = self.model.lock();
+            if model.is_alt_screen_active() {
+                model
+                    .alt_screen()
+                    .copy_mode()
+                    .is_some_and(|state| state.anchor.is_some())
+            } else {
+                model
+                    .block_list()
+                    .copy_mode()
+                    .is_some_and(|state| state.anchor.is_some())
+            }
+        };
         if !has_anchor {
             return;
         }
         let inverted = self.is_inverted_blocklist(ctx);
         let semantic_selection = SemanticSelection::as_ref(ctx);
-        let text =
-            self.model
-                .lock()
-                .block_list()
-                .selection_to_string(semantic_selection, inverted, ctx);
+        let text = self
+            .model
+            .lock()
+            .selection_to_string(semantic_selection, inverted, ctx);
         if let Some(text) = text {
             ctx.clipboard().write(ClipboardContent::plain_text(text));
         }
@@ -24099,6 +24133,19 @@ impl TerminalView {
         direction: FindDirection,
         ctx: &mut ViewContext<Self>,
     ) {
+        if self.model.lock().is_alt_screen_active() {
+            let target = self
+                .find_model
+                .as_ref(ctx)
+                .alt_screen_find_run()
+                .and_then(|run| run.focused_match_range())
+                .map(|range| *range.start());
+            if target.is_some() {
+                self.model.lock().alt_screen_mut().copy_mode_move_to(target);
+                ctx.notify();
+            }
+            return;
+        }
         let match_count = self.find_model.as_ref(ctx).match_count();
         let target = (0..match_count).find_map(|step| {
             if step > 0 {
@@ -29923,9 +29970,7 @@ impl View for TerminalView {
             context.set.insert("VoltronActive");
         }
 
-        if model_lock.block_list().copy_mode().is_some()
-            && !self.find_bar.as_ref(app).is_editor_focused(app)
-        {
+        if model_lock.is_in_copy_mode() && !self.find_bar.as_ref(app).is_editor_focused(app) {
             context.set.insert("CopyMode");
         }
 
