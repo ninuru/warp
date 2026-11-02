@@ -1,6 +1,6 @@
 use warp_core::semantic_selection::SemanticSelection;
-use warpui::App;
 use warpui::units::{IntoLines as _, Lines};
+use warpui::{App, AppContext};
 
 use super::*;
 use crate::terminal::block_filter::BlockFilterQuery;
@@ -123,7 +123,7 @@ fn copy_mode_moves_selects_and_yanks_block_output() {
             assert!(blocks.selection().is_none());
 
             let state = blocks
-                .copy_mode_toggle_visual(false)
+                .copy_mode_toggle_visual(SelectionType::Simple, false)
                 .expect("copy mode should stay active");
             assert_eq!(state.anchor, Some(state.cursor));
             assert_eq!(
@@ -150,7 +150,7 @@ fn copy_mode_moves_selects_and_yanks_block_output() {
             assert_eq!(*cursor.get(), Point::new(1, 0));
 
             let state = blocks
-                .copy_mode_toggle_visual(false)
+                .copy_mode_toggle_visual(SelectionType::Simple, false)
                 .expect("copy mode should stay active");
             assert_eq!(state.anchor, None);
             assert!(blocks.selection().is_none());
@@ -177,7 +177,7 @@ fn copy_mode_reverse_selection_includes_anchor_and_cursor() {
 
             blocks.enter_copy_mode(false);
             move_cursor(&mut blocks, CopyModeMotion::Right, false);
-            blocks.copy_mode_toggle_visual(false);
+            blocks.copy_mode_toggle_visual(SelectionType::Simple, false);
             move_cursor(&mut blocks, CopyModeMotion::Up, false);
             let cursor = move_cursor(&mut blocks, CopyModeMotion::Right, false);
             assert_eq!(*cursor.get(), Point::new(0, 2));
@@ -255,7 +255,7 @@ fn copy_mode_crosses_blocks_in_inverted_block_list() {
                 WithinBlock::new(Point::new(1, 0), second, GridType::Output)
             );
 
-            blocks.copy_mode_toggle_visual(true);
+            blocks.copy_mode_toggle_visual(SelectionType::Simple, true);
             let cursor = move_cursor(&mut blocks, CopyModeMotion::Down, true);
             assert_eq!(
                 cursor,
@@ -756,5 +756,136 @@ fn copy_mode_motions_use_displayed_rows_of_filtered_block() {
             CopyModeMotion::LineEnd,
             output_point(block, 1, 5),
         );
+    })
+}
+
+fn yank(blocks: &BlockList, ctx: &AppContext) -> String {
+    blocks
+        .selection_to_string(&SemanticSelection::mock(false, ""), false, ctx)
+        .expect("selection should have text")
+}
+
+fn toggle_visual(blocks: &mut BlockList, selection_type: SelectionType) -> CopyModeState {
+    blocks
+        .copy_mode_toggle_visual(selection_type, false)
+        .expect("copy mode should stay active")
+}
+
+fn swap_anchor(blocks: &mut BlockList) -> CopyModeState {
+    blocks
+        .copy_mode_swap_anchor(false)
+        .expect("copy mode should stay active")
+}
+
+#[test]
+fn copy_mode_line_visual_yanks_full_lines_across_blocks() {
+    App::test((), |app| async move {
+        app.read(|ctx| {
+            let mut blocks = new_block_list();
+            let (first, second) = insert_two_blocks(&mut blocks);
+            blocks.enter_copy_mode(false);
+            place_cursor(&mut blocks, output_point(first, 1, 1));
+
+            let state = toggle_visual(&mut blocks, SelectionType::Simple);
+            assert_eq!(state.anchor, Some(output_point(first, 1, 1)));
+            place_cursor(&mut blocks, output_point(second, 0, 0));
+            let text = yank(&blocks, ctx);
+            assert!(text.starts_with("b\n") && text.ends_with("\nc"), "{text:?}");
+
+            let state = toggle_visual(&mut blocks, SelectionType::Lines);
+            assert_eq!(state.anchor, Some(output_point(first, 1, 1)));
+            assert_eq!(state.selection_type, SelectionType::Lines);
+            let text = yank(&blocks, ctx);
+            assert!(
+                text.starts_with("bb\n") && text.ends_with("\ncc"),
+                "{text:?}"
+            );
+            assert!(text.contains("echo c"), "{text:?}");
+
+            let state = toggle_visual(&mut blocks, SelectionType::Lines);
+            assert_eq!(state.anchor, None);
+            assert!(blocks.selection().is_none());
+            assert!(blocks.copy_mode().is_some());
+        })
+    })
+}
+
+#[test]
+fn copy_mode_line_visual_within_one_block_selects_whole_rows() {
+    App::test((), |app| async move {
+        app.read(|ctx| {
+            let mut blocks = new_block_list();
+            let block_index = insert_block(&mut blocks, "echo", "ab cd\nef gh");
+            blocks.enter_copy_mode(false);
+            place_cursor(&mut blocks, output_point(block_index, 1, 2));
+
+            toggle_visual(&mut blocks, SelectionType::Lines);
+            assert_eq!(yank(&blocks, ctx), "ef gh");
+
+            move_cursor(&mut blocks, CopyModeMotion::Up, false);
+            assert_eq!(yank(&blocks, ctx), "ab cd\nef gh");
+        })
+    })
+}
+
+#[test]
+fn copy_mode_rect_visual_yanks_columns_and_toggles_off() {
+    App::test((), |app| async move {
+        app.read(|ctx| {
+            let mut blocks = new_block_list();
+            let block_index = insert_block(&mut blocks, "echo", "ab cd\nef gh");
+            blocks.enter_copy_mode(false);
+            place_cursor(&mut blocks, output_point(block_index, 0, 1));
+
+            let state = toggle_visual(&mut blocks, SelectionType::Rect);
+            assert_eq!(state.selection_type, SelectionType::Rect);
+            place_cursor(&mut blocks, output_point(block_index, 1, 3));
+            assert_eq!(yank(&blocks, ctx), "b c\nf g");
+
+            let state = swap_anchor(&mut blocks);
+            assert_eq!(state.cursor, output_point(block_index, 0, 1));
+            assert_eq!(state.anchor, Some(output_point(block_index, 1, 3)));
+            assert_eq!(yank(&blocks, ctx), "b c\nf g");
+
+            move_cursor(&mut blocks, CopyModeMotion::Left, false);
+            assert_eq!(yank(&blocks, ctx), "ab c\nef g");
+
+            let state = toggle_visual(&mut blocks, SelectionType::Rect);
+            assert_eq!(state.anchor, None);
+            assert!(blocks.selection().is_none());
+            assert!(blocks.copy_mode().is_some());
+        })
+    })
+}
+
+#[test]
+fn copy_mode_swap_anchor_moves_cursor_to_other_end() {
+    App::test((), |app| async move {
+        app.read(|ctx| {
+            let mut blocks = new_block_list();
+            let block_index = insert_block(&mut blocks, "echo", "ab cd\nef gh");
+            blocks.enter_copy_mode(false);
+            place_cursor(&mut blocks, output_point(block_index, 0, 1));
+
+            let state = swap_anchor(&mut blocks);
+            assert_eq!(state.anchor, None);
+            assert_eq!(state.cursor, output_point(block_index, 0, 1));
+
+            toggle_visual(&mut blocks, SelectionType::Simple);
+            place_cursor(&mut blocks, output_point(block_index, 1, 1));
+            assert_eq!(yank(&blocks, ctx), "b cd\nef");
+
+            let state = swap_anchor(&mut blocks);
+            assert_eq!(state.cursor, output_point(block_index, 0, 1));
+            assert_eq!(state.anchor, Some(output_point(block_index, 1, 1)));
+            assert_eq!(yank(&blocks, ctx), "b cd\nef");
+
+            move_cursor(&mut blocks, CopyModeMotion::Right, false);
+            assert_eq!(yank(&blocks, ctx), " cd\nef");
+
+            let state = toggle_visual(&mut blocks, SelectionType::Simple);
+            assert_eq!(state.anchor, None);
+            assert!(blocks.copy_mode().is_some());
+        })
     })
 }

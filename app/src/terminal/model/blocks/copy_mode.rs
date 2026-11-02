@@ -42,6 +42,7 @@ pub enum CopyModeMotion {
 pub struct CopyModeState {
     pub cursor: WithinBlock<Point>,
     pub anchor: Option<WithinBlock<Point>>,
+    pub selection_type: SelectionType,
 }
 
 pub struct CopyModeViewport<F> {
@@ -115,6 +116,7 @@ impl BlockList {
             CopyModeState {
                 cursor,
                 anchor: None,
+                selection_type: SelectionType::Simple,
             },
             inverted_blocklist,
         );
@@ -230,26 +232,42 @@ impl BlockList {
         let cursor = target
             .and_then(|target| self.clamp_copy_mode_point(target))
             .unwrap_or(state.cursor);
-        self.set_copy_mode(
-            CopyModeState {
-                cursor,
-                anchor: state.anchor,
-            },
-            inverted_blocklist,
-        );
+        self.set_copy_mode(CopyModeState { cursor, ..state }, inverted_blocklist);
         self.copy_mode
     }
 
-    pub fn copy_mode_toggle_visual(&mut self, inverted_blocklist: bool) -> Option<CopyModeState> {
+    pub fn copy_mode_toggle_visual(
+        &mut self,
+        selection_type: SelectionType,
+        inverted_blocklist: bool,
+    ) -> Option<CopyModeState> {
         let state = self.clamped_copy_mode()?;
         let anchor = match state.anchor {
-            Some(_) => None,
+            Some(_) if state.selection_type == selection_type => None,
+            Some(anchor) => Some(anchor),
             None => Some(state.cursor),
         };
         self.set_copy_mode(
             CopyModeState {
                 cursor: state.cursor,
                 anchor,
+                selection_type,
+            },
+            inverted_blocklist,
+        );
+        self.copy_mode
+    }
+
+    pub fn copy_mode_swap_anchor(&mut self, inverted_blocklist: bool) -> Option<CopyModeState> {
+        let state = self.clamped_copy_mode()?;
+        let Some(anchor) = state.anchor else {
+            return self.copy_mode;
+        };
+        self.set_copy_mode(
+            CopyModeState {
+                cursor: anchor,
+                anchor: Some(state.cursor),
+                selection_type: state.selection_type,
             },
             inverted_blocklist,
         );
@@ -281,7 +299,11 @@ impl BlockList {
         let anchor = state
             .anchor
             .and_then(|anchor| self.clamp_copy_mode_point(anchor));
-        Some(CopyModeState { cursor, anchor })
+        Some(CopyModeState {
+            cursor,
+            anchor,
+            selection_type: state.selection_type,
+        })
     }
 
     fn set_copy_mode(&mut self, state: CopyModeState, inverted_blocklist: bool) {
@@ -300,7 +322,7 @@ impl BlockList {
                     } else {
                         (Side::Left, Side::Right)
                     };
-                self.start_selection(anchor_point, SelectionType::Simple, anchor_side);
+                self.start_selection(anchor_point, state.selection_type, anchor_side);
                 self.update_selection(cursor_point, cursor_side);
             }
         }

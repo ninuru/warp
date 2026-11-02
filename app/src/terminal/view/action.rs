@@ -12,6 +12,7 @@ use warp_util::user_input::UserInput;
 use warpui::EntityId;
 use warpui::elements::HyperlinkUrl;
 use warpui::event::ModifiersState;
+use warpui::text::SelectionType;
 use warpui::units::Lines;
 
 use super::inline_banner::{
@@ -188,7 +189,8 @@ pub enum TerminalAction {
     KeyboardSelectText(SelectionDirection),
     EnterCopyMode,
     CopyModeMove(CopyModeMotion),
-    CopyModeToggleVisual,
+    CopyModeToggleVisual(SelectionType),
+    CopyModeSwapAnchor,
     CopyModeYank,
     ExitCopyMode,
     UserInputSequence(Vec<u8>),
@@ -562,7 +564,10 @@ impl fmt::Debug for TerminalAction {
             KeyboardSelectText(direction) => write!(f, "KeyboardSelectText({direction:?})"),
             EnterCopyMode => f.write_str("EnterCopyMode"),
             CopyModeMove(motion) => write!(f, "CopyModeMove({motion:?})"),
-            CopyModeToggleVisual => f.write_str("CopyModeToggleVisual"),
+            CopyModeToggleVisual(selection_type) => {
+                write!(f, "CopyModeToggleVisual({selection_type:?})")
+            }
+            CopyModeSwapAnchor => f.write_str("CopyModeSwapAnchor"),
             CopyModeYank => f.write_str("CopyModeYank"),
             ExitCopyMode => f.write_str("ExitCopyMode"),
             ContextMenu(action) => write!(f, "ContextMenu({action:?})"),
