@@ -23999,17 +23999,36 @@ impl TerminalView {
         ctx.notify();
     }
 
-    fn copy_mode_toggle_visual(&mut self, ctx: &mut ViewContext<Self>) {
+    fn copy_mode_toggle_visual(
+        &mut self,
+        selection_type: SelectionType,
+        ctx: &mut ViewContext<Self>,
+    ) {
         let inverted = self.is_inverted_blocklist(ctx);
         let toggled = self
             .model
             .lock()
             .block_list_mut()
-            .copy_mode_toggle_visual(inverted)
+            .copy_mode_toggle_visual(selection_type, inverted)
             .is_some();
         if !toggled {
             self.redetermine_global_focus(ctx);
         }
+        ctx.notify();
+    }
+
+    fn copy_mode_swap_anchor(&mut self, ctx: &mut ViewContext<Self>) {
+        let inverted = self.is_inverted_blocklist(ctx);
+        let swapped = self
+            .model
+            .lock()
+            .block_list_mut()
+            .copy_mode_swap_anchor(inverted)
+            .is_some();
+        if !swapped {
+            self.redetermine_global_focus(ctx);
+        }
+        self.scroll_to_copy_mode_cursor(ctx);
         ctx.notify();
     }
 
@@ -27886,7 +27905,8 @@ impl TypedActionView for TerminalView {
             | KeyboardSelectText(_)
             | EnterCopyMode
             | CopyModeMove(_)
-            | CopyModeToggleVisual
+            | CopyModeToggleVisual(_)
+            | CopyModeSwapAnchor
             | CopyModeYank
             | ExitCopyMode
             | ContextMenu(_)
@@ -28253,7 +28273,10 @@ impl TypedActionView for TerminalView {
             KeyboardSelectText(direction) => self.keyboard_select_text(ctx, direction),
             EnterCopyMode => self.enter_copy_mode(ctx),
             CopyModeMove(motion) => self.copy_mode_move(*motion, ctx),
-            CopyModeToggleVisual => self.copy_mode_toggle_visual(ctx),
+            CopyModeToggleVisual(selection_type) => {
+                self.copy_mode_toggle_visual(*selection_type, ctx)
+            }
+            CopyModeSwapAnchor => self.copy_mode_swap_anchor(ctx),
             CopyModeYank => self.copy_mode_yank(ctx),
             ExitCopyMode => self.exit_copy_mode(ctx),
             SelectBookmarkUp => match input_mode {

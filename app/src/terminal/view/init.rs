@@ -4,6 +4,7 @@ use warpui::keymap::{
     BindingDescription, ContextPredicate, EditableBinding, FixedBinding, PerPlatformKeystroke,
 };
 use warpui::platform::OperatingSystem;
+use warpui::text::SelectionType;
 use warpui::units::IntoLines;
 
 use super::{
@@ -273,7 +274,7 @@ pub fn init(app: &mut AppContext) {
         TerminalAction::Paste,
     )
     .with_key_binding("ctrl-v")
-    .with_context_predicate(id!("Terminal") & !id!("IMEOpen"))]);
+    .with_context_predicate(id!("Terminal") & !id!("IMEOpen") & !id!("CopyMode"))]);
 
     app.register_fixed_bindings([
         FixedBinding::new(
@@ -420,7 +421,22 @@ pub fn init(app: &mut AppContext) {
             TerminalAction::CopyModeMove(CopyModeMotion::ViewportBottom),
             copy_mode.clone(),
         ),
-        FixedBinding::new("v", TerminalAction::CopyModeToggleVisual, copy_mode.clone()),
+        FixedBinding::new(
+            "v",
+            TerminalAction::CopyModeToggleVisual(SelectionType::Simple),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "shift-V",
+            TerminalAction::CopyModeToggleVisual(SelectionType::Lines),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new(
+            "ctrl-v",
+            TerminalAction::CopyModeToggleVisual(SelectionType::Rect),
+            copy_mode.clone(),
+        ),
+        FixedBinding::new("o", TerminalAction::CopyModeSwapAnchor, copy_mode.clone()),
         FixedBinding::new("y", TerminalAction::CopyModeYank, copy_mode.clone()),
         FixedBinding::new("q", TerminalAction::ExitCopyMode, copy_mode.clone()),
         FixedBinding::new("escape", TerminalAction::ExitCopyMode, copy_mode),
