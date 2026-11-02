@@ -10,6 +10,8 @@
 use super::integration_tests;
 
 integration_tests! {
+    // Context switching runs in the active shell and preserves its input.
+    test_docker_context_selector,
     // Test command execution works.
     test_single_command,
     // Test shell process terminates when session is closed.

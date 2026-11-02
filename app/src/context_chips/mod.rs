@@ -193,6 +193,7 @@ pub enum ContextChipKind {
     GitDiffStats,
     GithubPullRequest,
     KubernetesContext,
+    DockerContext,
     SvnBranch,
     SvnDirtyItems,
     // This is for backwards compatibility with the old "RemoteLogin" chip.
@@ -333,6 +334,12 @@ impl ContextChipKind {
                 |_| None,
                 RefreshConfig::OnDemandOnly,
             )),
+            Self::DockerContext => Some(ContextChip::shell_builtin(
+                "Docker Context",
+                builtins::docker_current_context(),
+                Some(builtins::docker_contexts()),
+                RefreshConfig::OnDemandOnly,
+            )),
             Self::KubernetesContext => Some(ContextChip::shell_builtin(
                 "Kubernetes Context",
                 builtins::kubernetes_current_context(),
@@ -416,6 +423,7 @@ impl ContextChipKind {
             Self::Time12 => ChipValue::Text("03:48 pm".to_string()),
             Self::Time24 => ChipValue::Text("15:48".to_string()),
             Self::Custom { .. } => ChipValue::Text("custom chip".to_string()),
+            Self::DockerContext => ChipValue::Text("desktop-linux".to_string()),
             Self::KubernetesContext => ChipValue::Text("kube-context".to_string()),
             Self::SvnBranch => ChipValue::Text("svn-feature-branch".to_string()),
             Self::SvnDirtyItems => ChipValue::Text("3".to_string()),
@@ -449,7 +457,7 @@ impl ContextChipKind {
             Self::Date => prompt_colors.input_prompt_date,
             Self::Time12 => prompt_colors.input_prompt_time,
             Self::Time24 => prompt_colors.input_prompt_time,
-            Self::KubernetesContext => prompt_colors.input_prompt_kubernetes,
+            Self::DockerContext | Self::KubernetesContext => prompt_colors.input_prompt_kubernetes,
             Self::SvnBranch => prompt_colors.input_prompt_branch,
             Self::SvnDirtyItems => prompt_colors.input_prompt_svn,
             Self::Ssh => prompt_colors.input_prompt_ssh,
@@ -547,6 +555,7 @@ impl ContextChipKind {
             Self::GitDiffStats | Self::SvnDirtyItems => Some(Icon::File),
             Self::GithubPullRequest => Some(Icon::Github),
             Self::KubernetesContext => Some(Icon::Globe),
+            Self::DockerContext => Some(Icon::Docker),
             Self::AgentPlanAndTodoList => Some(Icon::CheckSkinny),
             Self::Custom { .. } => None,
         }
@@ -582,6 +591,7 @@ pub fn available_chips() -> Vec<ContextChipKind> {
         ContextChipKind::CondaEnvironment,
         ContextChipKind::NodeVersion,
         ContextChipKind::KubernetesContext,
+        ContextChipKind::DockerContext,
         ContextChipKind::SvnBranch,
         ContextChipKind::SvnDirtyItems,
     ]);
