@@ -1148,7 +1148,7 @@ impl<'a> ViewportState<'a> {
         }
     }
 
-    fn snackbar_header_height(&self) -> Lines {
+    pub fn snackbar_header_height(&self) -> Lines {
         let row_height = self.size_info.cell_height_px();
         self.snackbar_header_state()
             .header_position

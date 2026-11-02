@@ -2070,6 +2070,23 @@ fn shell_recovery_without_exit_code_reports_failure() {
     assert_ne!(terminal.active_block_id(), &interrupted_block_id);
 }
 #[test]
+fn copy_mode_alt_screen_exits_when_the_alt_screen_swaps() {
+    let mut terminal: TerminalModel = TerminalModel::mock(None, None);
+    terminal.enter_alt_screen(true);
+    assert!(terminal.alt_screen_mut().enter_copy_mode().is_some());
+    assert!(terminal.is_in_copy_mode());
+
+    terminal.exit_alt_screen(false);
+    assert!(terminal.alt_screen().copy_mode().is_none());
+    assert!(!terminal.is_in_copy_mode());
+
+    assert!(terminal.alt_screen_mut().enter_copy_mode().is_some());
+    terminal.enter_alt_screen(true);
+    assert!(terminal.alt_screen().copy_mode().is_none());
+    assert!(!terminal.is_in_copy_mode());
+}
+
+#[test]
 fn test_alt_screen_selection_tracks_scroll() {
     let mut terminal: TerminalModel = TerminalModel::mock(None, None);
     terminal.enter_alt_screen(true);

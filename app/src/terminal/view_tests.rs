@@ -11,6 +11,7 @@ use parking_lot::FairMutex;
 use session_sharing_protocol::common::CLIAgentSessionState;
 use warp_cli::agent::Harness;
 use warp_terminal::model::escape_sequences::{BRACKETED_PASTE_END, BRACKETED_PASTE_START, C0};
+use warpui::keymap::Trigger;
 use warpui::notification::UserNotification;
 use warpui::platform::WindowStyle;
 use warpui::{App, EntityIdSet, Presenter, ReadModel, WindowInvalidation};
@@ -83,6 +84,7 @@ use crate::terminal::shared_session::shared_handlers::{
 };
 use crate::terminal::shared_session::{SharedSessionSource, SharedSessionStatus};
 use crate::terminal::view::ambient_agent::AmbientAgentViewModelEvent;
+use crate::terminal::view::init::is_copy_mode_binding;
 use crate::terminal::view::load_ai_conversation::{
     RestoreConversationEntryBehavior, RestoredAIConversation,
 };
@@ -11007,5 +11009,172 @@ fn visible_bootstrap_block_leaves_focus_on_tab_group_rename_editor() {
         assert!(workspace.read(&app, |workspace, ctx| {
             workspace.is_inline_rename_editor_focused(ctx)
         }));
+    });
+}
+
+fn copy_mode_test_terminal(app: &mut App) -> (WindowId, ViewHandle<TerminalView>) {
+    initialize_app_for_terminal_view(app);
+    app.add_singleton_model(ImportedConfigModel::new);
+    app.update(|ctx| {
+        crate::terminal::init(ctx);
+        crate::editor::init(ctx);
+    });
+    let (window_id, terminal) = add_window_with_id_and_terminal(app, None);
+    terminal.update(app, |view, ctx| {
+        view.model
+            .lock()
+            .simulate_block("printf", "first line\nsecond line\nthird line");
+        view.focus_terminal(ctx);
+    });
+    (window_id, terminal)
+}
+
+fn copy_mode_cursor_row(app: &App, terminal: &ViewHandle<TerminalView>) -> Option<usize> {
+    terminal.read(app, |view, _| {
+        view.model
+            .lock()
+            .block_list()
+            .copy_mode()
+            .map(|state| state.cursor.get().row)
+    })
+}
+
+fn dispatch_copy_mode_key(
+    app: &mut App,
+    window_id: WindowId,
+    terminal: &ViewHandle<TerminalView>,
+    key: &str,
+) -> bool {
+    app.dispatch_keystroke(
+        window_id,
+        &[terminal.id()],
+        &Keystroke::parse(key).expect("valid keystroke"),
+        false,
+    )
+    .expect("dispatch should succeed")
+}
+
+#[test]
+fn copy_mode_default_key_dispatches_and_user_override_replaces_it() {
+    App::test((), |mut app| async move {
+        let _prefix_keys = FeatureFlag::PrefixKeys.override_enabled(true);
+        let (window_id, terminal) = copy_mode_test_terminal(&mut app);
+
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_action(&TerminalAction::EnterCopyMode, ctx);
+        });
+        let start_row = copy_mode_cursor_row(&app, &terminal).expect("copy mode is active");
+
+        assert!(dispatch_copy_mode_key(&mut app, window_id, &terminal, "k"));
+        assert_eq!(copy_mode_cursor_row(&app, &terminal), Some(start_row - 1));
+
+        app.update(|ctx| {
+            ctx.set_custom_trigger(
+                "terminal:copy_mode_up".to_owned(),
+                Trigger::Keystrokes(vec![Keystroke::parse("x").expect("valid keystroke")]),
+            );
+        });
+
+        assert!(!dispatch_copy_mode_key(&mut app, window_id, &terminal, "k"));
+        assert_eq!(copy_mode_cursor_row(&app, &terminal), Some(start_row - 1));
+
+        assert!(dispatch_copy_mode_key(&mut app, window_id, &terminal, "x"));
+        assert_eq!(copy_mode_cursor_row(&app, &terminal), Some(start_row - 2));
+
+        assert!(dispatch_copy_mode_key(&mut app, window_id, &terminal, "j"));
+        assert_eq!(copy_mode_cursor_row(&app, &terminal), Some(start_row - 1));
+    });
+}
+
+#[test]
+fn copy_mode_keys_win_over_other_user_terminal_bindings() {
+    App::test((), |mut app| async move {
+        let _prefix_keys = FeatureFlag::PrefixKeys.override_enabled(true);
+        let (window_id, terminal) = copy_mode_test_terminal(&mut app);
+
+        app.update(|ctx| {
+            ctx.set_custom_trigger(
+                "terminal:select_bookmark_up".to_owned(),
+                Trigger::Keystrokes(vec![Keystroke::parse("k").expect("valid keystroke")]),
+            );
+        });
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_action(&TerminalAction::EnterCopyMode, ctx);
+        });
+        let start_row = copy_mode_cursor_row(&app, &terminal).expect("copy mode is active");
+
+        assert!(dispatch_copy_mode_key(&mut app, window_id, &terminal, "k"));
+        assert_eq!(copy_mode_cursor_row(&app, &terminal), Some(start_row - 1));
+
+        assert!(dispatch_copy_mode_key(
+            &mut app, window_id, &terminal, "escape"
+        ));
+        assert_eq!(copy_mode_cursor_row(&app, &terminal), None);
+    });
+}
+
+#[test]
+fn copy_mode_palette_offers_enter_but_hides_internal_bindings() {
+    App::test((), |mut app| async move {
+        let _prefix_keys = FeatureFlag::PrefixKeys.override_enabled(true);
+        let (window_id, terminal) = copy_mode_test_terminal(&mut app);
+
+        let names_in_view = |app: &App| -> Vec<String> {
+            app.read(|ctx| {
+                ctx.key_bindings_for_view(window_id, terminal.id())
+                    .into_iter()
+                    .map(|binding| binding.name.to_owned())
+                    .collect()
+            })
+        };
+
+        let outside_copy_mode = names_in_view(&app);
+        assert!(
+            outside_copy_mode
+                .iter()
+                .any(|name| name == "terminal:enter_copy_mode")
+        );
+        assert!(!is_copy_mode_binding("terminal:enter_copy_mode"));
+        assert!(
+            !outside_copy_mode
+                .iter()
+                .any(|name| is_copy_mode_binding(name))
+        );
+
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_action(&TerminalAction::EnterCopyMode, ctx);
+        });
+
+        let copy_mode_actions: Vec<(String, bool)> = app.read(|ctx| {
+            ctx.key_bindings_for_view(window_id, terminal.id())
+                .into_iter()
+                .filter_map(|binding| {
+                    let action = binding.action.as_any().downcast_ref::<TerminalAction>()?;
+                    let is_internal = matches!(
+                        action,
+                        TerminalAction::CopyModeMove(_)
+                            | TerminalAction::CopyModeToggleVisual(_)
+                            | TerminalAction::CopyModeSwapAnchor
+                            | TerminalAction::CopyModeYank
+                            | TerminalAction::CopyModeSearch(_)
+                            | TerminalAction::CopyModeSearchNext { .. }
+                            | TerminalAction::ExitCopyMode
+                    );
+                    is_internal.then(|| (binding.name.to_owned(), binding.description.is_some()))
+                })
+                .collect()
+        });
+        assert!(
+            copy_mode_actions
+                .iter()
+                .any(|(name, _)| name == "terminal:copy_mode_word_forward")
+        );
+        for (name, has_description) in copy_mode_actions {
+            assert!(has_description, "{name} should be an editable binding");
+            assert!(
+                is_copy_mode_binding(&name),
+                "{name} would show in the palette"
+            );
+        }
     });
 }

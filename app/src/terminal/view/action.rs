@@ -12,6 +12,7 @@ use warp_util::user_input::UserInput;
 use warpui::EntityId;
 use warpui::elements::HyperlinkUrl;
 use warpui::event::ModifiersState;
+use warpui::text::SelectionType;
 use warpui::units::Lines;
 
 use super::inline_banner::{
@@ -46,6 +47,7 @@ use crate::terminal::shared_session::SharedSessionActionSource;
 use crate::terminal::view::RichContentSecretTooltipInfo;
 use crate::terminal::view::inline_banner::AgentModeSetupSpeedbumpBannerAction;
 use crate::terminal::view::passive_suggestions::PromptSuggestionResolution;
+use crate::view_components::find::FindDirection;
 use crate::workflows::workflow::Workflow;
 
 /// Version of the agent onboarding flow (non-legacy).
@@ -188,8 +190,13 @@ pub enum TerminalAction {
     KeyboardSelectText(SelectionDirection),
     EnterCopyMode,
     CopyModeMove(CopyModeMotion),
-    CopyModeToggleVisual,
+    CopyModeToggleVisual(SelectionType),
+    CopyModeSwapAnchor,
     CopyModeYank,
+    CopyModeSearch(FindDirection),
+    CopyModeSearchNext {
+        reverse: bool,
+    },
     ExitCopyMode,
     UserInputSequence(Vec<u8>),
     ControlSequence(Vec<u8>),
@@ -562,8 +569,15 @@ impl fmt::Debug for TerminalAction {
             KeyboardSelectText(direction) => write!(f, "KeyboardSelectText({direction:?})"),
             EnterCopyMode => f.write_str("EnterCopyMode"),
             CopyModeMove(motion) => write!(f, "CopyModeMove({motion:?})"),
-            CopyModeToggleVisual => f.write_str("CopyModeToggleVisual"),
+            CopyModeToggleVisual(selection_type) => {
+                write!(f, "CopyModeToggleVisual({selection_type:?})")
+            }
+            CopyModeSwapAnchor => f.write_str("CopyModeSwapAnchor"),
             CopyModeYank => f.write_str("CopyModeYank"),
+            CopyModeSearch(direction) => write!(f, "CopyModeSearch({direction:?})"),
+            CopyModeSearchNext { reverse } => {
+                write!(f, "CopyModeSearchNext {{ reverse: {reverse} }}")
+            }
             ExitCopyMode => f.write_str("ExitCopyMode"),
             ContextMenu(action) => write!(f, "ContextMenu({action:?})"),
             CtrlD => f.write_str("CtrlD"),

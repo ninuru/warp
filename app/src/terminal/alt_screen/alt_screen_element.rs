@@ -539,6 +539,31 @@ impl AltScreenElement {
         };
     }
 
+    fn render_copy_mode_cursor(
+        &self,
+        cursor: Point,
+        size_info: &SizeInfo,
+        origin: Vector2F,
+        ctx: &mut PaintContext,
+    ) {
+        let point = SelectionPoint {
+            row: cursor.row.into_lines(),
+            col: cursor.col,
+        };
+        let warp_theme = &self.grid_render_params.warp_theme;
+        let mut color = warp_theme.cursor().into_solid();
+        color.a = warp_theme.text_selection_color().into_solid().a;
+        grid_renderer::render_selection(
+            &point,
+            &point,
+            size_info,
+            Lines::zero(),
+            origin,
+            color,
+            ctx,
+        );
+    }
+
     /// Renders any shared session participants' selections.
     fn render_participant_selections(
         &self,
@@ -786,6 +811,14 @@ impl Element for AltScreenElement {
             adjusted_grid_origin,
             ctx,
         );
+        if let Some(cursor) = model.alt_screen().copy_mode_cursor() {
+            self.render_copy_mode_cursor(
+                cursor,
+                &self.grid_render_params.size_info,
+                adjusted_grid_origin,
+                ctx,
+            );
+        }
         self.render_participant_selections(
             &self.grid_render_params.size_info,
             adjusted_grid_origin,

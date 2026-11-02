@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
-pub use copy_mode::{CopyModeMotion, CopyModeState};
+pub use copy_mode::{CopyModeMotion, CopyModeState, CopyModeViewport};
 use instant::SystemTime;
 use rustc_hash::FxHashMap;
 use selection::BlockListSelection;
@@ -309,7 +309,7 @@ pub struct BlockList {
     /// copy/insert paths can find the selected text via
     /// [`rich_content_blocks_in_selection`](Self::rich_content_blocks_in_selection).
     rich_content_selections: Vec<EntityId>,
-    copy_mode: Option<CopyModeState>,
+    copy_mode: Option<CopyModeState<WithinBlock<Point>>>,
     /// If this is Some, and if smart-select is enabled, double-clicking within this range will
     /// select this range instead of the normal smart-select logic. The purpose of this is to
     /// allow double-click selection to work on the TerminalView::highlighted_link even when it
@@ -2585,7 +2585,7 @@ impl BlockList {
     /// in the blocklist, as specified by the block_index and grid_type parameters. Returns
     /// a point in the bottom row of the discovered grid at the specified column.
     fn seek_up_to_next_grid(
-        &mut self,
+        &self,
         block_index: BlockIndex,
         grid_type: GridType,
         column: usize,

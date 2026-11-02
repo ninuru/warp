@@ -399,4 +399,5 @@ integration_tests! {
     test_root_ctrl_shift_enter_splits_right,
     test_root_alt_shift_enter_splits_down,
     test_copy_mode_yanks_selection,
+    test_copy_mode_alt_screen_yanks_selection,
 }

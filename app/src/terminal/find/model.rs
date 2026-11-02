@@ -11,6 +11,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use alt_screen::{AltScreenFindRun, run_find_on_alt_screen};
+use async_find::AbsoluteMatch;
 pub use async_find::{AsyncFindController, AsyncFindStatus};
 use block_list::run_find_on_block_list;
 pub use block_list::{BlockGridMatch, BlockListFindRun, BlockListMatch};
@@ -297,6 +298,17 @@ impl TerminalFindModel {
     ///
     /// This works for both sync and async find paths.
     pub(crate) fn focused_block_list_match(&self) -> Option<BlockListMatch> {
+        self.focused_block_list_match_with(AbsoluteMatch::to_range)
+    }
+
+    pub(crate) fn focused_original_block_list_match(&self) -> Option<BlockListMatch> {
+        self.focused_block_list_match_with(AbsoluteMatch::to_original_range)
+    }
+
+    fn focused_block_list_match_with(
+        &self,
+        to_range: fn(&AbsoluteMatch, &GridHandler) -> Option<RangeInclusive<Point>>,
+    ) -> Option<BlockListMatch> {
         let model = self.terminal_model.lock();
         if model.is_alt_screen_active() {
             // Alt screen doesn't use BlockListMatch.
@@ -315,7 +327,7 @@ impl TerminalFindModel {
                     GridType::Output => block.output_grid().grid_handler(),
                     _ => return None,
                 };
-                let range = async_match.range.to_range(grid)?;
+                let range = to_range(&async_match.range, grid)?;
                 return Some(BlockListMatch::CommandBlock(BlockGridMatch {
                     block_index: async_match.block_index,
                     grid_type: async_match.grid_type,

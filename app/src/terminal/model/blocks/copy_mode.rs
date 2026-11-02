@@ -1,34 +1,144 @@
-use vim::vim::{Direction, WordBound, WordType};
-use vim::vim_word_iterator_from_offset;
-use warp_terminal::model::grid::cell::DEFAULT_CHAR;
+use std::cmp::Ordering;
+use std::iter;
+
+use vim::vim::Direction;
 use warpui::text::SelectionType;
-use warpui::units::IntoLines as _;
+use warpui::units::{IntoLines as _, Lines};
 
 use super::{BlockList, BlockListPoint};
 use crate::terminal::GridType;
+use crate::terminal::find::{BlockGridMatch, BlockListMatch};
+use crate::terminal::model::copy_mode::{CopyModeGrid, CopyModeGridRow};
+pub use crate::terminal::model::copy_mode::{CopyModeMotion, CopyModeState};
 use crate::terminal::model::grid::Dimensions;
 use crate::terminal::model::index::{Point, Side};
 use crate::terminal::model::terminal_model::WithinBlock;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CopyModeMotion {
-    Left,
-    Right,
-    Up,
-    Down,
-    WordForward,
-    WordBackward,
-    WordEnd,
+pub struct CopyModeViewport<F> {
+    pub top: Lines,
+    pub bottom: Lines,
+    pub visual_row: F,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CopyModeState {
-    pub cursor: WithinBlock<Point>,
-    pub anchor: Option<WithinBlock<Point>>,
+impl<F: Fn(Lines) -> Lines> CopyModeViewport<F> {
+    fn half_page(&self) -> usize {
+        (((self.bottom - self.top).as_f64() + 1.) / 2.)
+            .floor()
+            .max(1.) as usize
+    }
+}
+
+struct BlockListCopyGrid<'a, F> {
+    block_list: &'a BlockList,
+    inverted_blocklist: bool,
+    viewport: &'a CopyModeViewport<F>,
+}
+
+impl<F: Fn(Lines) -> Lines> CopyModeGrid for BlockListCopyGrid<'_, F> {
+    type Point = WithinBlock<Point>;
+
+    fn position(point: &WithinBlock<Point>) -> Point {
+        *point.get()
+    }
+
+    fn with_position(point: &WithinBlock<Point>, position: Point) -> WithinBlock<Point> {
+        with_point(*point, position)
+    }
+
+    fn grid_row(&self, row: &WithinBlock<Point>) -> Option<CopyModeGridRow<'_>> {
+        let grid = self
+            .block_list
+            .block_at(row.block_index)?
+            .grid_of_type(row.grid)?;
+        Some(CopyModeGridRow {
+            grid: grid.grid_handler(),
+            row: row.get().row,
+            rows: grid.len_displayed(),
+        })
+    }
+
+    fn adjacent_row(
+        &self,
+        row: &WithinBlock<Point>,
+        direction: Direction,
+    ) -> Option<WithinBlock<Point>> {
+        self.block_list
+            .copy_mode_adjacent_row(row, direction, self.inverted_blocklist)
+    }
+
+    fn buffer_edge_row(
+        &self,
+        cursor: &WithinBlock<Point>,
+        direction: Direction,
+    ) -> Option<WithinBlock<Point>> {
+        let edge_grid = iter::successors(Some(*cursor), |grid| match direction {
+            Direction::Forward => self.block_list.seek_down_to_next_grid(
+                grid.block_index,
+                grid.grid,
+                0,
+                self.inverted_blocklist,
+            ),
+            Direction::Backward => self.block_list.seek_up_to_next_grid(
+                grid.block_index,
+                grid.grid,
+                0,
+                self.inverted_blocklist,
+            ),
+        })
+        .last()?;
+        let row = match direction {
+            Direction::Forward => self
+                .block_list
+                .copy_mode_grid_rows(&edge_grid)
+                .checked_sub(1)?,
+            Direction::Backward => 0,
+        };
+        Some(with_point(edge_grid, Point::new(row, 0)))
+    }
+
+    fn viewport_rows(&self, cursor: &WithinBlock<Point>) -> Vec<WithinBlock<Point>> {
+        let position = |row: &WithinBlock<Point>| {
+            let block_list_row = BlockListPoint::from_within_block_point(row, self.block_list).row;
+            let visual_row = (self.viewport.visual_row)(block_list_row);
+            if visual_row < self.viewport.top {
+                Ordering::Less
+            } else if visual_row > self.viewport.bottom {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
+        };
+        let visible_row = match position(cursor) {
+            Ordering::Less => self
+                .rows_from(*cursor, Direction::Forward)
+                .find(|row| position(row) != Ordering::Less),
+            Ordering::Equal => Some(*cursor),
+            Ordering::Greater => self
+                .rows_from(*cursor, Direction::Backward)
+                .find(|row| position(row) != Ordering::Greater),
+        };
+        let Some(top) = visible_row
+            .filter(|row| position(row) == Ordering::Equal)
+            .and_then(|row| {
+                self.rows_from(row, Direction::Backward)
+                    .take_while(|row| position(row) == Ordering::Equal)
+                    .last()
+            })
+        else {
+            return Vec::new();
+        };
+        self.rows_from(top, Direction::Forward)
+            .take_while(|row| position(row) == Ordering::Equal)
+            .collect()
+    }
+
+    fn half_page(&self) -> usize {
+        self.viewport.half_page()
+    }
 }
 
 impl BlockList {
-    pub fn copy_mode(&self) -> Option<CopyModeState> {
+    pub fn copy_mode(&self) -> Option<CopyModeState<WithinBlock<Point>>> {
         self.copy_mode
     }
 
@@ -37,16 +147,13 @@ impl BlockList {
             .and_then(|state| self.clamp_copy_mode_point(state.cursor))
     }
 
-    pub fn enter_copy_mode(&mut self, inverted_blocklist: bool) -> Option<CopyModeState> {
+    pub fn enter_copy_mode(
+        &mut self,
+        inverted_blocklist: bool,
+    ) -> Option<CopyModeState<WithinBlock<Point>>> {
         let cursor = self.copy_mode_start_cursor()?;
         self.clear_selection();
-        self.set_copy_mode(
-            CopyModeState {
-                cursor,
-                anchor: None,
-            },
-            inverted_blocklist,
-        );
+        self.set_copy_mode(CopyModeState::new(cursor), inverted_blocklist);
         self.copy_mode
     }
 
@@ -56,74 +163,71 @@ impl BlockList {
         }
     }
 
-    pub fn copy_mode_move(
-        &mut self,
+    pub fn copy_mode_target<F: Fn(Lines) -> Lines>(
+        &self,
         motion: CopyModeMotion,
         inverted_blocklist: bool,
-    ) -> Option<CopyModeState> {
-        let state = self.clamped_copy_mode()?;
-        let cursor = state.cursor;
-        let point = *cursor.get();
-        let new_cursor = match motion {
-            CopyModeMotion::Left => Some(with_point(
-                cursor,
-                Point::new(point.row, point.col.saturating_sub(1)),
-            )),
-            CopyModeMotion::Right => Some(with_point(cursor, Point::new(point.row, point.col + 1))),
-            CopyModeMotion::Up if point.row > 0 => {
-                Some(with_point(cursor, Point::new(point.row - 1, point.col)))
-            }
-            CopyModeMotion::Up => self.seek_up_to_next_grid(
-                cursor.block_index,
-                cursor.grid,
-                point.col,
-                inverted_blocklist,
-            ),
-            CopyModeMotion::Down if point.row + 1 < self.copy_mode_grid_rows(&cursor) => {
-                Some(with_point(cursor, Point::new(point.row + 1, point.col)))
-            }
-            CopyModeMotion::Down => self.seek_down_to_next_grid(
-                cursor.block_index,
-                cursor.grid,
-                point.col,
-                inverted_blocklist,
-            ),
-            CopyModeMotion::WordForward => {
-                self.copy_mode_word_motion(&cursor, Direction::Forward, WordBound::Start)
-            }
-            CopyModeMotion::WordBackward => {
-                self.copy_mode_word_motion(&cursor, Direction::Backward, WordBound::Start)
-            }
-            CopyModeMotion::WordEnd => {
-                self.copy_mode_word_motion(&cursor, Direction::Forward, WordBound::End)
-            }
-        };
-        let cursor = new_cursor
-            .and_then(|new_cursor| self.clamp_copy_mode_point(new_cursor))
-            .unwrap_or(cursor);
-        self.set_copy_mode(
-            CopyModeState {
-                cursor,
-                anchor: state.anchor,
-            },
+        viewport: &CopyModeViewport<F>,
+    ) -> Option<WithinBlock<Point>> {
+        let cursor = self.copy_mode_cursor()?;
+        BlockListCopyGrid {
+            block_list: self,
             inverted_blocklist,
-        );
+            viewport,
+        }
+        .copy_mode_target(&cursor, motion)
+    }
+
+    pub fn copy_mode_move_to(
+        &mut self,
+        target: Option<WithinBlock<Point>>,
+        inverted_blocklist: bool,
+    ) -> Option<CopyModeState<WithinBlock<Point>>> {
+        let state = self.clamped_copy_mode()?;
+        let cursor = target
+            .and_then(|target| self.clamp_copy_mode_point(target))
+            .unwrap_or(state.cursor);
+        self.set_copy_mode(state.with_cursor(cursor), inverted_blocklist);
         self.copy_mode
     }
 
-    pub fn copy_mode_toggle_visual(&mut self, inverted_blocklist: bool) -> Option<CopyModeState> {
+    pub fn copy_mode_match_point(
+        &self,
+        original_match: &BlockListMatch,
+    ) -> Option<WithinBlock<Point>> {
+        match original_match {
+            BlockListMatch::CommandBlock(BlockGridMatch {
+                grid_type,
+                range,
+                block_index,
+                ..
+            }) => {
+                let grid = self.block_at(*block_index)?.grid_of_type(*grid_type)?;
+                let point = grid
+                    .grid_handler()
+                    .maybe_translate_point_from_original_to_displayed(*range.start());
+                self.clamp_copy_mode_point(WithinBlock::new(point, *block_index, *grid_type))
+            }
+            BlockListMatch::RichContent { .. } => None,
+        }
+    }
+
+    pub fn copy_mode_toggle_visual(
+        &mut self,
+        selection_type: SelectionType,
+        inverted_blocklist: bool,
+    ) -> Option<CopyModeState<WithinBlock<Point>>> {
         let state = self.clamped_copy_mode()?;
-        let anchor = match state.anchor {
-            Some(_) => None,
-            None => Some(state.cursor),
-        };
-        self.set_copy_mode(
-            CopyModeState {
-                cursor: state.cursor,
-                anchor,
-            },
-            inverted_blocklist,
-        );
+        self.set_copy_mode(state.toggled_visual(selection_type), inverted_blocklist);
+        self.copy_mode
+    }
+
+    pub fn copy_mode_swap_anchor(
+        &mut self,
+        inverted_blocklist: bool,
+    ) -> Option<CopyModeState<WithinBlock<Point>>> {
+        let state = self.clamped_copy_mode()?;
+        self.set_copy_mode(state.swapped(), inverted_blocklist);
         self.copy_mode
     }
 
@@ -143,7 +247,7 @@ impl BlockList {
         }
     }
 
-    fn clamped_copy_mode(&mut self) -> Option<CopyModeState> {
+    fn clamped_copy_mode(&mut self) -> Option<CopyModeState<WithinBlock<Point>>> {
         let state = self.copy_mode?;
         let Some(cursor) = self.clamp_copy_mode_point(state.cursor) else {
             self.exit_copy_mode();
@@ -152,10 +256,18 @@ impl BlockList {
         let anchor = state
             .anchor
             .and_then(|anchor| self.clamp_copy_mode_point(anchor));
-        Some(CopyModeState { cursor, anchor })
+        Some(CopyModeState {
+            cursor,
+            anchor,
+            selection_type: state.selection_type,
+        })
     }
 
-    fn set_copy_mode(&mut self, state: CopyModeState, inverted_blocklist: bool) {
+    fn set_copy_mode(
+        &mut self,
+        state: CopyModeState<WithinBlock<Point>>,
+        inverted_blocklist: bool,
+    ) {
         match state.anchor {
             None => {
                 if self.selection.is_some() {
@@ -171,7 +283,7 @@ impl BlockList {
                     } else {
                         (Side::Left, Side::Right)
                     };
-                self.start_selection(anchor_point, SelectionType::Simple, anchor_side);
+                self.start_selection(anchor_point, state.selection_type, anchor_side);
                 self.update_selection(cursor_point, cursor_side);
             }
         }
@@ -189,39 +301,31 @@ impl BlockList {
         ))
     }
 
-    fn copy_mode_word_motion(
+    fn copy_mode_adjacent_row(
         &self,
-        cursor: &WithinBlock<Point>,
+        row: &WithinBlock<Point>,
         direction: Direction,
-        bound: WordBound,
+        inverted_blocklist: bool,
     ) -> Option<WithinBlock<Point>> {
-        let point = *cursor.get();
-        let text = self.copy_mode_row_text(cursor)?;
-        let offset = vim_word_iterator_from_offset(
-            point.col,
-            text.as_str(),
-            direction,
-            bound,
-            WordType::Default,
-        )
-        .ok()?
-        .next()?;
-        Some(with_point(
-            *cursor,
-            Point::new(point.row, offset.as_usize()),
-        ))
-    }
-
-    fn copy_mode_row_text(&self, point: &WithinBlock<Point>) -> Option<String> {
-        let grid = self.block_at(point.block_index)?.grid_of_type(point.grid)?;
-        let grid_handler = grid.grid_handler();
-        let row = grid_handler.row(point.get().row)?;
-        Some(
-            (0..grid_handler.columns())
-                .filter_map(|col| row.get(col).map(|cell| cell.c))
-                .map(|c| if c == DEFAULT_CHAR { ' ' } else { c })
-                .collect(),
-        )
+        let point = *row.get();
+        let adjacent = match direction {
+            Direction::Forward if point.row + 1 < self.copy_mode_grid_rows(row) => {
+                Some(with_point(*row, Point::new(point.row + 1, point.col)))
+            }
+            Direction::Forward => self.seek_down_to_next_grid(
+                row.block_index,
+                row.grid,
+                point.col,
+                inverted_blocklist,
+            ),
+            Direction::Backward if point.row > 0 => {
+                Some(with_point(*row, Point::new(point.row - 1, point.col)))
+            }
+            Direction::Backward => {
+                self.seek_up_to_next_grid(row.block_index, row.grid, point.col, inverted_blocklist)
+            }
+        };
+        adjacent.and_then(|adjacent| self.clamp_copy_mode_point(adjacent))
     }
 
     fn copy_mode_grid_rows(&self, point: &WithinBlock<Point>) -> usize {
