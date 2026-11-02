@@ -14797,11 +14797,13 @@ impl Workspace {
         ctx.notify();
     }
 
-    fn open_projects_palette(&mut self, ctx: &mut ViewContext<Self>) {
+    fn open_projects_palette(&mut self, open_only: bool, ctx: &mut ViewContext<Self>) {
         let open = self.open_projects().into_iter().rev().collect();
         let active = self.active_project().root.clone();
         let data_source_store = self.palette.as_ref(ctx).data_source_store.clone();
-        data_source_store.update(ctx, |store, ctx| store.refresh_projects(open, active, ctx));
+        data_source_store.update(ctx, |store, ctx| {
+            store.refresh_projects(open, active, open_only, ctx)
+        });
         self.palette.update(ctx, |view, ctx| {
             view.reset(ctx);
             view.set_active_query_filter(QueryFilter::ProjectSessions, ctx);
@@ -15046,7 +15048,8 @@ impl Workspace {
             PaletteMode::WarpDrive => self.open_warp_drive_palette(ctx),
             PaletteMode::Files => self.open_files_palette(ctx),
             PaletteMode::Conversations => self.open_conversations_palette(ctx),
-            PaletteMode::ProjectSessions => self.open_projects_palette(ctx),
+            PaletteMode::ProjectSessions => self.open_projects_palette(false, ctx),
+            PaletteMode::OpenProjectSessions => self.open_projects_palette(true, ctx),
         }
 
         ctx.focus(&self.palette);
