@@ -445,7 +445,7 @@ use crate::terminal::model::block::{
 use crate::terminal::model::blockgrid::BlockGrid;
 use crate::terminal::model::blocks::{
     AgentTranscriptNavigableItem, BlockHeight, BlockHeightItem, BlockHeightSummary, BlockList,
-    BlockListPoint, CopyModeMotion, Gap, RemovableBlocklistItem,
+    BlockListPoint, CopyModeMotion, CopyModeViewport, Gap, RemovableBlocklistItem,
 };
 use crate::terminal::model::escape_sequences::{
     self, C1, EscCodes, ToEscapeSequence, alt_screen_scroll_to_pty_bytes,
@@ -23972,12 +23972,26 @@ impl TerminalView {
 
     fn copy_mode_move(&mut self, motion: CopyModeMotion, ctx: &mut ViewContext<Self>) {
         let inverted = self.is_inverted_blocklist(ctx);
-        let moved = self
-            .model
-            .lock()
-            .block_list_mut()
-            .copy_mode_move(motion, inverted)
-            .is_some();
+        let input_mode = *InputModeSettings::as_ref(ctx).input_mode.value();
+        let moved = {
+            let mut model = self.model.lock();
+            let target = {
+                let viewport = self.viewport_state(model.block_list(), input_mode, ctx);
+                let scroll_top = viewport.scroll_top_in_lines();
+                let copy_mode_viewport = CopyModeViewport {
+                    top: scroll_top + viewport.snackbar_header_height(),
+                    bottom: scroll_top + self.content_element_height_lines(ctx) - 1.0.into_lines(),
+                    visual_row: |row| viewport.block_list_y_to_scroll_y(row),
+                };
+                model
+                    .block_list()
+                    .copy_mode_target(motion, inverted, &copy_mode_viewport)
+            };
+            model
+                .block_list_mut()
+                .copy_mode_move_to(target, inverted)
+                .is_some()
+        };
         if !moved {
             self.redetermine_global_focus(ctx);
         }

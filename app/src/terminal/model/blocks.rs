@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
-pub use copy_mode::{CopyModeMotion, CopyModeState};
+pub use copy_mode::{CopyModeMotion, CopyModeState, CopyModeViewport};
 use instant::SystemTime;
 use rustc_hash::FxHashMap;
 use selection::BlockListSelection;
@@ -2585,7 +2585,7 @@ impl BlockList {
     /// in the blocklist, as specified by the block_index and grid_type parameters. Returns
     /// a point in the bottom row of the discovered grid at the specified column.
     fn seek_up_to_next_grid(
-        &mut self,
+        &self,
         block_index: BlockIndex,
         grid_type: GridType,
         column: usize,
