@@ -45,6 +45,7 @@ use crate::server::telemetry::{LaunchConfigUiLocation, TelemetryEvent};
 use crate::session_management::SessionSource;
 use crate::settings::CtrlTabBehavior;
 use crate::terminal::keys_settings::KeysSettings;
+use crate::terminal::view::init::is_copy_mode_binding;
 use crate::themes::theme::WarpTheme;
 use crate::view_components::DismissibleToast;
 use crate::workspace::{ForkedConversationDestination, WorkspaceAction, active_terminal_in_window};
@@ -474,7 +475,7 @@ impl View {
         ctx: &mut ViewContext<Self>,
     ) {
         let ctrl_tab_behavior = *KeysSettings::as_ref(ctx).ctrl_tab_behavior;
-        let binding_filter_fn: BindingFilterFn =
+        let session_cycle_filter_fn: BindingFilterFn =
             if matches!(ctrl_tab_behavior, CtrlTabBehavior::CycleMostRecentSession) {
                 Some(Arc::new(|binding| {
                     if let Some(action) = &binding.action {
@@ -494,6 +495,12 @@ impl View {
             } else {
                 None
             };
+        let binding_filter_fn: BindingFilterFn = Some(Arc::new(move |binding| {
+            !is_copy_mode_binding(&binding.name)
+                && session_cycle_filter_fn
+                    .as_ref()
+                    .is_none_or(|filter| filter(binding))
+        }));
         self.binding_source.update(ctx, move |binding_source, ctx| {
             *binding_source = BindingSource::View {
                 window_id,

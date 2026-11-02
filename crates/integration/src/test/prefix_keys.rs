@@ -24,6 +24,8 @@ const PREFIX_CHIP_SCREENSHOT: &str = "prefix-chip.png";
 const PREFIX_CHIP_CANCELLED_SCREENSHOT: &str = "prefix-chip-cancelled.png";
 const COPY_MODE_CURSOR_SCREENSHOT: &str = "copy-mode-cursor.png";
 const COPY_MODE_SELECTION_SCREENSHOT: &str = "copy-mode-selection.png";
+const COPY_MODE_EXITED_SCREENSHOT: &str = "copy-mode-exited.png";
+const COPY_MODE_ALT_SCREEN_SCREENSHOT: &str = "copy-mode-alt-screen.png";
 const COPY_MODE_COMMAND: &str = "printf 'first line\\nsecond line\\n'";
 const ALT_SCREEN_COPY_MODE_COMMAND: &str =
     "(printf 'alpha one\\nbeta two\\ngamma three\\n'; seq 1 200) | less";
@@ -43,6 +45,7 @@ fn ctrl_a_bracket() -> TestStep {
         .with_event(ctrl_a())
         .with_keystrokes(&["["])
         .add_named_assertion("copy mode is active", assert_copy_mode_row(Some(1)))
+        .add_named_assertion("COPY badge is shown", assert_copy_mode_badge_rendered(true))
         .add_named_assertion(
             "input editor did not receive `[`",
             assert_input_editor_contents(0, ""),
@@ -62,6 +65,21 @@ fn assert_copy_mode_row(expected_row: Option<usize>) -> AssertionCallback {
             async_assert!(
                 row == expected_row,
                 "Expected copy mode cursor row {expected_row:?}, got {row:?}"
+            )
+        })
+    })
+}
+
+fn assert_copy_mode_badge_rendered(expected: bool) -> AssertionCallback {
+    Box::new(move |app, window_id| {
+        let terminal_view = single_terminal_view_for_tab(app, window_id, 0);
+        terminal_view.read(app, |view, ctx| {
+            let rendered = ctx
+                .element_position_by_id_at_last_frame(window_id, view.copy_mode_badge_position_id())
+                .is_some();
+            async_assert!(
+                rendered == expected,
+                "Expected copy mode badge rendered {expected}, got {rendered}"
             )
         })
     })
@@ -303,6 +321,7 @@ pub fn test_copy_mode_yanks_selection() -> Builder {
                 .with_keystrokes(&["v", "e", "y"])
                 .add_named_assertion("clipboard holds the word", assert_clipboard_text("second"))
                 .add_named_assertion("yank exits copy mode", assert_copy_mode_row(None))
+                .add_named_assertion("COPY badge is gone", assert_copy_mode_badge_rendered(false))
                 .add_named_assertion(
                     "input editor did not receive copy mode keys",
                     assert_input_editor_contents(0, ""),
@@ -313,6 +332,7 @@ pub fn test_copy_mode_yanks_selection() -> Builder {
             new_step_with_default_assertions("q exits copy mode")
                 .with_keystrokes(&["q"])
                 .add_named_assertion("copy mode is inactive", assert_copy_mode_row(None))
+                .add_named_assertion("COPY badge is gone", assert_copy_mode_badge_rendered(false))
                 .add_named_assertion(
                     "input editor did not receive `q`",
                     assert_input_editor_contents(0, ""),
@@ -322,7 +342,8 @@ pub fn test_copy_mode_yanks_selection() -> Builder {
         .with_step(
             new_step_with_default_assertions("escape exits copy mode")
                 .with_keystrokes(&["escape"])
-                .add_named_assertion("copy mode is inactive", assert_copy_mode_row(None)),
+                .add_named_assertion("copy mode is inactive", assert_copy_mode_row(None))
+                .add_named_assertion("COPY badge is gone", assert_copy_mode_badge_rendered(false)),
         )
 }
 
@@ -334,6 +355,7 @@ fn ctrl_a_bracket_on_alt_screen() -> TestStep {
             "copy mode is active",
             assert_alt_screen_copy_mode_row_is_some(),
         )
+        .add_named_assertion("COPY badge is shown", assert_copy_mode_badge_rendered(true))
         .add_named_assertion(
             "less did not receive `[`",
             assert_alt_screen_first_line(ALT_SCREEN_FIRST_LINE),
@@ -384,6 +406,7 @@ pub fn test_copy_mode_alt_screen_yanks_selection() -> Builder {
                     "yank exits copy mode",
                     assert_alt_screen_copy_mode_row(None),
                 )
+                .add_named_assertion("COPY badge is gone", assert_copy_mode_badge_rendered(false))
                 .add_named_assertion("less is still running", assert_alt_grid_active(0, 0, true))
                 .add_named_assertion(
                     "less did not receive copy mode keys",
@@ -398,6 +421,7 @@ pub fn test_copy_mode_alt_screen_yanks_selection() -> Builder {
                     "copy mode is inactive",
                     assert_alt_screen_copy_mode_row(None),
                 )
+                .add_named_assertion("COPY badge is gone", assert_copy_mode_badge_rendered(false))
                 .add_named_assertion("less is still running", assert_alt_grid_active(0, 0, true))
                 .add_named_assertion(
                     "less still shows the first page",
@@ -427,5 +451,26 @@ pub fn test_copy_mode_cursor_screenshot() -> Builder {
                 .with_keystrokes(&["v", "j", "e"])
                 .set_post_step_pause(CHIP_RENDER_PAUSE)
                 .with_take_screenshot(COPY_MODE_SELECTION_SCREENSHOT),
+        )
+        .with_step(
+            new_step_with_default_assertions("escape exits copy mode and hides the badge")
+                .with_keystrokes(&["escape"])
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot(COPY_MODE_EXITED_SCREENSHOT)
+                .add_named_assertion("COPY badge is gone", assert_copy_mode_badge_rendered(false)),
+        )
+        .with_step(execute_long_running_command(
+            0,
+            ALT_SCREEN_COPY_MODE_COMMAND.to_owned(),
+        ))
+        .with_step(
+            ctrl_a_bracket_on_alt_screen()
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot(COPY_MODE_ALT_SCREEN_SCREENSHOT),
+        )
+        .with_step(
+            TestStep::new("q q leaves copy mode and less")
+                .with_keystrokes(&["q", "q"])
+                .add_named_assertion("alt screen is gone", assert_alt_grid_active(0, 0, false)),
         )
 }
