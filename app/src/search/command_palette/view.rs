@@ -475,31 +475,28 @@ impl View {
         ctx: &mut ViewContext<Self>,
     ) {
         let ctrl_tab_behavior = *KeysSettings::as_ref(ctx).ctrl_tab_behavior;
-        let session_cycle_filter_fn: BindingFilterFn =
-            if matches!(ctrl_tab_behavior, CtrlTabBehavior::CycleMostRecentSession) {
-                Some(Arc::new(|binding| {
-                    if let Some(action) = &binding.action {
-                        // Filter out the cycle next/prev session actions from the palette if ctrl-tab
-                        // behavior is set to cycle most/least recent session. Clicking on them or hitting enter
-                        // doesn't make sense because the action needs to be triggered from a ctrl-tab only (with
-                        // ctrl key held down).
-                        !matches!(
-                            action.as_any().downcast_ref::<WorkspaceAction>(),
-                            Some(WorkspaceAction::CycleNextSession)
-                                | Some(WorkspaceAction::CyclePrevSession)
-                        )
-                    } else {
-                        true
-                    }
-                }))
-            } else {
-                None
-            };
+        let hide_session_cycle =
+            matches!(ctrl_tab_behavior, CtrlTabBehavior::CycleMostRecentSession);
         let binding_filter_fn: BindingFilterFn = Some(Arc::new(move |binding| {
-            !is_copy_mode_binding(&binding.name)
-                && session_cycle_filter_fn
-                    .as_ref()
-                    .is_none_or(|filter| filter(binding))
+            if is_copy_mode_binding(&binding.name) {
+                return false;
+            }
+            if !hide_session_cycle {
+                return true;
+            }
+            if let Some(action) = &binding.action {
+                // Filter out the cycle next/prev session actions from the palette if ctrl-tab
+                // behavior is set to cycle most/least recent session. Clicking on them or hitting enter
+                // doesn't make sense because the action needs to be triggered from a ctrl-tab only (with
+                // ctrl key held down).
+                !matches!(
+                    action.as_any().downcast_ref::<WorkspaceAction>(),
+                    Some(WorkspaceAction::CycleNextSession)
+                        | Some(WorkspaceAction::CyclePrevSession)
+                )
+            } else {
+                true
+            }
         }));
         self.binding_source.update(ctx, move |binding_source, ctx| {
             *binding_source = BindingSource::View {
