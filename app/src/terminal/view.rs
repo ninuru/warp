@@ -6,6 +6,7 @@ pub mod block_onboarding;
 pub(crate) mod blocklist_filter;
 mod bookmarks;
 mod context_menu;
+mod copy_mode_badge;
 pub mod init;
 pub mod inline_banner;
 pub mod load_ai_conversation;
@@ -26220,6 +26221,14 @@ impl TerminalView {
         format!("waterfall_background__{}", self.view_id)
     }
 
+    pub fn copy_mode_badge_position_id(&self) -> String {
+        format!("copy_mode_badge__{}", self.view_id)
+    }
+
+    fn alt_screen_position_id(&self) -> String {
+        format!("alt_screen__{}", self.view_id)
+    }
+
     /// Renders the bookmark indicators over the given block list or waterfall gap element
     ///
     /// Will only create indicators if there are blocks bookmarked
@@ -29454,11 +29463,15 @@ impl View for TerminalView {
                         did_wrap_terminal_size = true;
                         wrap_in_terminal_size_element(
                             &self.resize_tx,
-                            self.render_alt_screen_element(
-                                app,
-                                &model,
-                                model.alt_screen().selection_range(semantic_selection),
-                            ),
+                            SavePosition::new(
+                                self.render_alt_screen_element(
+                                    app,
+                                    &model,
+                                    model.alt_screen().selection_range(semantic_selection),
+                                ),
+                                &self.alt_screen_position_id(),
+                            )
+                            .finish(),
                         )
                     } else {
                         self.render_block_list_element(&model, input_mode, true, app)
@@ -29704,6 +29717,47 @@ impl View for TerminalView {
 
         if self.find_model.as_ref(app).is_find_bar_open() {
             stack.add_child(ChildView::new(&self.find_bar).finish());
+        }
+
+        if model.is_in_copy_mode() {
+            let offset = vec2f(-10. - SCROLLBAR_WIDTH.as_f32(), -10.);
+            let positioning = match (
+                is_alt_screen_active,
+                input_mode,
+                self.is_input_box_visible(&model, app),
+            ) {
+                (true, _, _) => OffsetPositioning::offset_from_save_position_element(
+                    self.alt_screen_position_id(),
+                    offset,
+                    PositionedElementOffsetBounds::WindowByPosition,
+                    PositionedElementAnchor::BottomRight,
+                    ChildAnchor::BottomRight,
+                ),
+                (false, InputMode::PinnedToBottom | InputMode::Waterfall, true) => {
+                    OffsetPositioning::offset_from_save_position_element(
+                        self.input.as_ref(app).save_position_id(),
+                        offset,
+                        PositionedElementOffsetBounds::WindowByPosition,
+                        PositionedElementAnchor::TopRight,
+                        ChildAnchor::BottomRight,
+                    )
+                }
+                (false, InputMode::PinnedToTop, _) | (false, _, false) => {
+                    OffsetPositioning::offset_from_parent(
+                        offset,
+                        ParentOffsetBounds::ParentByPosition,
+                        ParentAnchor::BottomRight,
+                        ChildAnchor::BottomRight,
+                    )
+                }
+            };
+            stack.add_positioned_child(
+                copy_mode_badge::render_copy_mode_badge(
+                    &self.copy_mode_badge_position_id(),
+                    appearance,
+                ),
+                positioning,
+            );
         }
 
         if let Some(active_filter_editor_block_index) = self.active_filter_editor_block_index {

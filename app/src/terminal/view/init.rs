@@ -50,6 +50,8 @@ pub const CYCLE_NEXT_ORCHESTRATION_CHILD_AGENT_KEYBINDING: &str =
 pub const CYCLE_PREVIOUS_ORCHESTRATION_CHILD_AGENT_KEYBINDING: &str =
     "terminal:cycle_previous_orchestration_child_agent";
 
+const COPY_MODE_BINDING_PREFIX: &str = "terminal:copy_mode_";
+
 const SELECT_NEXT_BLOCK_ACTION_NAME: &str = "terminal:select_next_block";
 pub const SELECT_PREVIOUS_BLOCK_ACTION_NAME: &str = "terminal:select_previous_block";
 
@@ -307,164 +309,6 @@ pub fn init(app: &mut AppContext) {
     )
     .with_context_predicate(id!("Terminal") & id!("TerminalView_NonEmptyBlockList"))
     .with_enabled(|| FeatureFlag::PrefixKeys.is_enabled())]);
-
-    let copy_mode = id!("Terminal") & id!("CopyMode");
-    app.register_fixed_bindings([
-        FixedBinding::new(
-            "h",
-            TerminalAction::CopyModeMove(CopyModeMotion::Left),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "j",
-            TerminalAction::CopyModeMove(CopyModeMotion::Down),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "k",
-            TerminalAction::CopyModeMove(CopyModeMotion::Up),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "l",
-            TerminalAction::CopyModeMove(CopyModeMotion::Right),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "w",
-            TerminalAction::CopyModeMove(CopyModeMotion::WordForward),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "b",
-            TerminalAction::CopyModeMove(CopyModeMotion::WordBackward),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "e",
-            TerminalAction::CopyModeMove(CopyModeMotion::WordEnd),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-W",
-            TerminalAction::CopyModeMove(CopyModeMotion::BigWordForward),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-B",
-            TerminalAction::CopyModeMove(CopyModeMotion::BigWordBackward),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-E",
-            TerminalAction::CopyModeMove(CopyModeMotion::BigWordEnd),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "0",
-            TerminalAction::CopyModeMove(CopyModeMotion::LineStart),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-^",
-            TerminalAction::CopyModeMove(CopyModeMotion::FirstNonBlank),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "^",
-            TerminalAction::CopyModeMove(CopyModeMotion::FirstNonBlank),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-$",
-            TerminalAction::CopyModeMove(CopyModeMotion::LineEnd),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "$",
-            TerminalAction::CopyModeMove(CopyModeMotion::LineEnd),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "g",
-            TerminalAction::CopyModeMove(CopyModeMotion::BufferTop),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-G",
-            TerminalAction::CopyModeMove(CopyModeMotion::BufferBottom),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "ctrl-u",
-            TerminalAction::CopyModeMove(CopyModeMotion::HalfPageUp),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "ctrl-d",
-            TerminalAction::CopyModeMove(CopyModeMotion::HalfPageDown),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-H",
-            TerminalAction::CopyModeMove(CopyModeMotion::ViewportTop),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-M",
-            TerminalAction::CopyModeMove(CopyModeMotion::ViewportMiddle),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-L",
-            TerminalAction::CopyModeMove(CopyModeMotion::ViewportBottom),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "v",
-            TerminalAction::CopyModeToggleVisual(SelectionType::Simple),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-V",
-            TerminalAction::CopyModeToggleVisual(SelectionType::Lines),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "ctrl-v",
-            TerminalAction::CopyModeToggleVisual(SelectionType::Rect),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new("o", TerminalAction::CopyModeSwapAnchor, copy_mode.clone()),
-        FixedBinding::new("y", TerminalAction::CopyModeYank, copy_mode.clone()),
-        FixedBinding::new(
-            "/",
-            TerminalAction::CopyModeSearch(FindDirection::Down),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-?",
-            TerminalAction::CopyModeSearch(FindDirection::Up),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "?",
-            TerminalAction::CopyModeSearch(FindDirection::Up),
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "n",
-            TerminalAction::CopyModeSearchNext { reverse: false },
-            copy_mode.clone(),
-        ),
-        FixedBinding::new(
-            "shift-N",
-            TerminalAction::CopyModeSearchNext { reverse: true },
-            copy_mode.clone(),
-        ),
-        FixedBinding::new("q", TerminalAction::ExitCopyMode, copy_mode.clone()),
-        FixedBinding::new("escape", TerminalAction::ExitCopyMode, copy_mode),
-    ]);
 
     app.register_editable_bindings([
         // Ctrl-G: toggle CLI agent rich input.
@@ -1287,6 +1131,224 @@ pub fn init(app: &mut AppContext) {
             )]);
         }
     }
+
+    register_copy_mode_bindings(app);
+}
+
+pub fn is_copy_mode_binding(name: &str) -> bool {
+    name.starts_with(COPY_MODE_BINDING_PREFIX)
+}
+
+fn register_copy_mode_bindings(app: &mut AppContext) {
+    use CopyModeMotion::*;
+    use warpui::keymap::macros::*;
+
+    let motions = [
+        ("terminal:copy_mode_left", "Copy mode: move left", Left, "h"),
+        ("terminal:copy_mode_down", "Copy mode: move down", Down, "j"),
+        ("terminal:copy_mode_up", "Copy mode: move up", Up, "k"),
+        (
+            "terminal:copy_mode_right",
+            "Copy mode: move right",
+            Right,
+            "l",
+        ),
+        (
+            "terminal:copy_mode_word_forward",
+            "Copy mode: next word",
+            WordForward,
+            "w",
+        ),
+        (
+            "terminal:copy_mode_word_backward",
+            "Copy mode: previous word",
+            WordBackward,
+            "b",
+        ),
+        (
+            "terminal:copy_mode_word_end",
+            "Copy mode: end of word",
+            WordEnd,
+            "e",
+        ),
+        (
+            "terminal:copy_mode_big_word_forward",
+            "Copy mode: next big word",
+            BigWordForward,
+            "shift-W",
+        ),
+        (
+            "terminal:copy_mode_big_word_backward",
+            "Copy mode: previous big word",
+            BigWordBackward,
+            "shift-B",
+        ),
+        (
+            "terminal:copy_mode_big_word_end",
+            "Copy mode: end of big word",
+            BigWordEnd,
+            "shift-E",
+        ),
+        (
+            "terminal:copy_mode_line_start",
+            "Copy mode: start of line",
+            LineStart,
+            "0",
+        ),
+        (
+            "terminal:copy_mode_first_non_blank",
+            "Copy mode: first non-blank character",
+            FirstNonBlank,
+            "^",
+        ),
+        (
+            "terminal:copy_mode_first_non_blank",
+            "Copy mode: first non-blank character",
+            FirstNonBlank,
+            "shift-^",
+        ),
+        (
+            "terminal:copy_mode_line_end",
+            "Copy mode: end of line",
+            LineEnd,
+            "$",
+        ),
+        (
+            "terminal:copy_mode_line_end",
+            "Copy mode: end of line",
+            LineEnd,
+            "shift-$",
+        ),
+        (
+            "terminal:copy_mode_buffer_top",
+            "Copy mode: top of buffer",
+            BufferTop,
+            "g",
+        ),
+        (
+            "terminal:copy_mode_buffer_bottom",
+            "Copy mode: bottom of buffer",
+            BufferBottom,
+            "shift-G",
+        ),
+        (
+            "terminal:copy_mode_half_page_up",
+            "Copy mode: half page up",
+            HalfPageUp,
+            "ctrl-u",
+        ),
+        (
+            "terminal:copy_mode_half_page_down",
+            "Copy mode: half page down",
+            HalfPageDown,
+            "ctrl-d",
+        ),
+        (
+            "terminal:copy_mode_viewport_top",
+            "Copy mode: top of screen",
+            ViewportTop,
+            "shift-H",
+        ),
+        (
+            "terminal:copy_mode_viewport_middle",
+            "Copy mode: middle of screen",
+            ViewportMiddle,
+            "shift-M",
+        ),
+        (
+            "terminal:copy_mode_viewport_bottom",
+            "Copy mode: bottom of screen",
+            ViewportBottom,
+            "shift-L",
+        ),
+    ]
+    .map(|(name, description, motion, key)| {
+        (name, description, TerminalAction::CopyModeMove(motion), key)
+    });
+
+    let others = [
+        (
+            "terminal:copy_mode_visual",
+            "Copy mode: toggle visual selection",
+            TerminalAction::CopyModeToggleVisual(SelectionType::Simple),
+            "v",
+        ),
+        (
+            "terminal:copy_mode_visual_line",
+            "Copy mode: toggle line selection",
+            TerminalAction::CopyModeToggleVisual(SelectionType::Lines),
+            "shift-V",
+        ),
+        (
+            "terminal:copy_mode_visual_block",
+            "Copy mode: toggle block selection",
+            TerminalAction::CopyModeToggleVisual(SelectionType::Rect),
+            "ctrl-v",
+        ),
+        (
+            "terminal:copy_mode_swap_anchor",
+            "Copy mode: swap selection ends",
+            TerminalAction::CopyModeSwapAnchor,
+            "o",
+        ),
+        (
+            "terminal:copy_mode_yank",
+            "Copy mode: yank selection",
+            TerminalAction::CopyModeYank,
+            "y",
+        ),
+        (
+            "terminal:copy_mode_search_forward",
+            "Copy mode: search forward",
+            TerminalAction::CopyModeSearch(FindDirection::Down),
+            "/",
+        ),
+        (
+            "terminal:copy_mode_search_backward",
+            "Copy mode: search backward",
+            TerminalAction::CopyModeSearch(FindDirection::Up),
+            "?",
+        ),
+        (
+            "terminal:copy_mode_search_backward",
+            "Copy mode: search backward",
+            TerminalAction::CopyModeSearch(FindDirection::Up),
+            "shift-?",
+        ),
+        (
+            "terminal:copy_mode_search_next",
+            "Copy mode: next match",
+            TerminalAction::CopyModeSearchNext { reverse: false },
+            "n",
+        ),
+        (
+            "terminal:copy_mode_search_previous",
+            "Copy mode: previous match",
+            TerminalAction::CopyModeSearchNext { reverse: true },
+            "shift-N",
+        ),
+        (
+            "terminal:copy_mode_exit",
+            "Copy mode: exit",
+            TerminalAction::ExitCopyMode,
+            "q",
+        ),
+        (
+            "terminal:copy_mode_exit_alternate",
+            "Copy mode: exit (alternate key)",
+            TerminalAction::ExitCopyMode,
+            "escape",
+        ),
+    ];
+
+    app.register_editable_bindings(motions.into_iter().chain(others).map(
+        |(name, description, action, key)| {
+            EditableBinding::new(name, description, action)
+                .with_key_binding(key)
+                .with_context_predicate(id!("Terminal") & id!("CopyMode"))
+                .with_enabled(|| FeatureFlag::PrefixKeys.is_enabled())
+        },
+    ));
 }
 
 /// Registers bindings related to input modes.
