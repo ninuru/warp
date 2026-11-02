@@ -4,8 +4,9 @@ use warp::features::FeatureFlag;
 use warp::integration_testing::pane_group::assert_num_panes_in_tab;
 use warp::integration_testing::step::new_step_with_default_assertions;
 use warp::integration_testing::terminal::{
-    assert_input_editor_contents, assert_no_block_executing, execute_command_successfully,
-    execute_long_running_command, wait_until_bootstrapped_single_pane_for_tab,
+    assert_alt_grid_active, assert_input_editor_contents, assert_no_block_executing,
+    execute_command_successfully, execute_long_running_command,
+    wait_until_bootstrapped_single_pane_for_tab,
 };
 use warp::integration_testing::view_getters::single_terminal_view_for_tab;
 use warp::integration_testing::workspace::{assert_focused_tab_index, assert_tab_count};
@@ -24,6 +25,9 @@ const PREFIX_CHIP_CANCELLED_SCREENSHOT: &str = "prefix-chip-cancelled.png";
 const COPY_MODE_CURSOR_SCREENSHOT: &str = "copy-mode-cursor.png";
 const COPY_MODE_SELECTION_SCREENSHOT: &str = "copy-mode-selection.png";
 const COPY_MODE_COMMAND: &str = "printf 'first line\\nsecond line\\n'";
+const ALT_SCREEN_COPY_MODE_COMMAND: &str =
+    "(printf 'alpha one\\nbeta two\\ngamma three\\n'; seq 1 200) | less";
+const ALT_SCREEN_FIRST_LINE: &str = "alpha one";
 
 fn ctrl_a() -> Event {
     Event::KeyDown {
@@ -58,6 +62,38 @@ fn assert_copy_mode_row(expected_row: Option<usize>) -> AssertionCallback {
             async_assert!(
                 row == expected_row,
                 "Expected copy mode cursor row {expected_row:?}, got {row:?}"
+            )
+        })
+    })
+}
+
+fn assert_alt_screen_copy_mode_row(expected_row: Option<usize>) -> AssertionCallback {
+    Box::new(move |app, window_id| {
+        let terminal_view = single_terminal_view_for_tab(app, window_id, 0);
+        terminal_view.read(app, |view, _| {
+            let row = view
+                .model
+                .lock()
+                .alt_screen()
+                .copy_mode()
+                .map(|state| state.cursor.row);
+            async_assert!(
+                row == expected_row,
+                "Expected alt screen copy mode cursor row {expected_row:?}, got {row:?}"
+            )
+        })
+    })
+}
+
+fn assert_alt_screen_first_line(expected: &'static str) -> AssertionCallback {
+    Box::new(move |app, window_id| {
+        let terminal_view = single_terminal_view_for_tab(app, window_id, 0);
+        terminal_view.read(app, |view, _| {
+            let output = view.model.lock().alt_screen().output_to_string();
+            let first_line = output.lines().next().unwrap_or_default().trim_end();
+            async_assert!(
+                first_line == expected,
+                "Expected alt screen first line {expected:?}, got {first_line:?}"
             )
         })
     })
@@ -287,6 +323,91 @@ pub fn test_copy_mode_yanks_selection() -> Builder {
             new_step_with_default_assertions("escape exits copy mode")
                 .with_keystrokes(&["escape"])
                 .add_named_assertion("copy mode is inactive", assert_copy_mode_row(None)),
+        )
+}
+
+fn ctrl_a_bracket_on_alt_screen() -> TestStep {
+    TestStep::new("ctrl-a [ enters copy mode on the alt screen")
+        .with_event(ctrl_a())
+        .with_keystrokes(&["["])
+        .add_named_assertion(
+            "copy mode is active",
+            assert_alt_screen_copy_mode_row_is_some(),
+        )
+        .add_named_assertion(
+            "less did not receive `[`",
+            assert_alt_screen_first_line(ALT_SCREEN_FIRST_LINE),
+        )
+}
+
+fn assert_alt_screen_copy_mode_row_is_some() -> AssertionCallback {
+    Box::new(|app, window_id| {
+        let terminal_view = single_terminal_view_for_tab(app, window_id, 0);
+        terminal_view.read(app, |view, _| {
+            let is_active = view.model.lock().alt_screen().copy_mode().is_some();
+            async_assert!(is_active, "Expected alt screen copy mode to be active")
+        })
+    })
+}
+
+pub fn test_copy_mode_alt_screen_yanks_selection() -> Builder {
+    prefix_builder()
+        .with_step(
+            execute_long_running_command(0, ALT_SCREEN_COPY_MODE_COMMAND.to_owned())
+                .add_named_assertion(
+                    "less is on the alt screen",
+                    assert_alt_grid_active(0, 0, true),
+                )
+                .add_named_assertion(
+                    "less shows the first page",
+                    assert_alt_screen_first_line(ALT_SCREEN_FIRST_LINE),
+                ),
+        )
+        .with_step(ctrl_a_bracket_on_alt_screen())
+        .with_step(
+            TestStep::new("g and j move the cursor to beta")
+                .with_keystrokes(&["g", "j"])
+                .add_named_assertion(
+                    "cursor is on the beta row",
+                    assert_alt_screen_copy_mode_row(Some(1)),
+                )
+                .add_named_assertion(
+                    "less did not scroll on `j`",
+                    assert_alt_screen_first_line(ALT_SCREEN_FIRST_LINE),
+                ),
+        )
+        .with_step(
+            TestStep::new("v e y yanks beta")
+                .with_keystrokes(&["v", "e", "y"])
+                .add_named_assertion("clipboard holds the word", assert_clipboard_text("beta"))
+                .add_named_assertion(
+                    "yank exits copy mode",
+                    assert_alt_screen_copy_mode_row(None),
+                )
+                .add_named_assertion("less is still running", assert_alt_grid_active(0, 0, true))
+                .add_named_assertion(
+                    "less did not receive copy mode keys",
+                    assert_alt_screen_first_line(ALT_SCREEN_FIRST_LINE),
+                ),
+        )
+        .with_step(ctrl_a_bracket_on_alt_screen())
+        .with_step(
+            TestStep::new("q exits copy mode without quitting less")
+                .with_keystrokes(&["q"])
+                .add_named_assertion(
+                    "copy mode is inactive",
+                    assert_alt_screen_copy_mode_row(None),
+                )
+                .add_named_assertion("less is still running", assert_alt_grid_active(0, 0, true))
+                .add_named_assertion(
+                    "less still shows the first page",
+                    assert_alt_screen_first_line(ALT_SCREEN_FIRST_LINE),
+                ),
+        )
+        .with_step(
+            TestStep::new("a second q quits less")
+                .with_keystrokes(&["q"])
+                .add_named_assertion("alt screen is gone", assert_alt_grid_active(0, 0, false)),
         )
 }
 

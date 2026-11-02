@@ -309,7 +309,7 @@ pub struct BlockList {
     /// copy/insert paths can find the selected text via
     /// [`rich_content_blocks_in_selection`](Self::rich_content_blocks_in_selection).
     rich_content_selections: Vec<EntityId>,
-    copy_mode: Option<CopyModeState>,
+    copy_mode: Option<CopyModeState<WithinBlock<Point>>>,
     /// If this is Some, and if smart-select is enabled, double-clicking within this range will
     /// select this range instead of the normal smart-select logic. The purpose of this is to
     /// allow double-click selection to work on the TerminalView::highlighted_link even when it

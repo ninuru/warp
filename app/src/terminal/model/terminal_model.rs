@@ -2087,6 +2087,10 @@ impl TerminalModel {
         self.alt_screen_active
     }
 
+    pub fn is_in_copy_mode(&self) -> bool {
+        self.block_list.copy_mode().is_some() || self.alt_screen.copy_mode().is_some()
+    }
+
     pub fn set_pending_shell_launch_data(&mut self, shell_launch_data: ShellLaunchData) {
         self.active_shell_launch_data = Some(shell_launch_data.clone());
         self.pending_shell_launch_data = Some(shell_launch_data);
@@ -2253,6 +2257,7 @@ impl TerminalModel {
         }
 
         self.alt_screen_mut().clear_selection();
+        self.block_list.exit_copy_mode();
         self.alt_screen_active = true;
 
         self.event_proxy
@@ -2272,6 +2277,7 @@ impl TerminalModel {
         }
 
         self.alt_screen_mut().grid_handler_mut().evict_all_images();
+        self.alt_screen.exit_copy_mode();
 
         self.alt_screen_active = false;
 
