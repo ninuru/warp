@@ -374,6 +374,7 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
     register_test!(test_osc8_no_regression_on_url_autodetect);
 
     register_test!(test_context_chips_prompt_at_bootstrap);
+    register_test!(test_docker_context_selector);
 
     register_test!(test_cycle_active_tab_color_with_keybinding);
     register_test!(test_active_session_follows_focus);

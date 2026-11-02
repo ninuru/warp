@@ -13,7 +13,31 @@ use warp_core::ui::color::contrast::{MinimumAllowedContrast, high_enough_contras
 use warp_core::ui::theme::{Details, Fill, WarpTheme, mock_terminal_colors};
 use warpui::color::ColorU;
 
-use super::readable_chip_label_color;
+use super::prompt::PromptConfiguration;
+use super::{ContextChipKind, available_chips, readable_chip_label_color};
+use crate::settings::WarpPromptSeparator;
+
+#[test]
+fn docker_context_is_available_without_being_in_the_default_prompt() {
+    assert!(available_chips().contains(&ContextChipKind::DockerContext));
+    let chip = ContextChipKind::DockerContext.to_chip().unwrap();
+    assert_eq!(chip.title(), "Docker Context");
+    assert!(chip.on_click_generator().is_some());
+    assert!(
+        !PromptConfiguration::default_prompt()
+            .chip_kinds()
+            .contains(&ContextChipKind::DockerContext)
+    );
+
+    let config = PromptConfiguration::from_chips(
+        [ContextChipKind::DockerContext],
+        false,
+        WarpPromptSeparator::None,
+    );
+    let saved = serde_json::to_string(&config).unwrap();
+    let restored: PromptConfiguration = serde_json::from_str(&saved).unwrap();
+    assert_eq!(restored.chip_kinds(), vec![ContextChipKind::DockerContext]);
+}
 
 /// Builds a solid-background/foreground theme (colors as `0xRRGGBBAA`). The
 /// terminal palette does not affect text/surface contrast, so a mock is fine.

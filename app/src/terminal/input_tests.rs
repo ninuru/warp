@@ -440,6 +440,30 @@ fn empty_shell_widget_handoff_selection_keeps_original_buffer() {
 }
 
 #[test]
+fn renders_docker_context_prompt_chip_command_as_single_shell_argument() {
+    let command = PromptChipShellCommand::DockerContextUse {
+        context_name: "dev;$(id) 'quoted'".to_string(),
+    };
+
+    assert_eq!(
+        render_prompt_chip_shell_command(&command, ShellType::Bash),
+        r#"docker context use -- 'dev;$(id) '"'"'quoted'"'"''"#
+    );
+    assert_eq!(
+        render_prompt_chip_shell_command(&command, ShellType::Zsh),
+        r#"docker context use -- 'dev;$(id) '"'"'quoted'"'"''"#
+    );
+    assert_eq!(
+        render_prompt_chip_shell_command(&command, ShellType::Fish),
+        r"docker context use -- 'dev;$(id) \'quoted\''"
+    );
+    assert_eq!(
+        render_prompt_chip_shell_command(&command, ShellType::PowerShell),
+        "docker context use -- 'dev;$(id) ''quoted'''"
+    );
+}
+
+#[test]
 fn renders_git_checkout_prompt_chip_command_as_single_shell_argument() {
     let command = PromptChipShellCommand::GitCheckout {
         branch_name: "poc;id>/tmp/proof $(whoami) `id` | cat 'tail'".to_string(),

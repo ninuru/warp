@@ -10,7 +10,7 @@ use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
     Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
     DEFAULT_UI_LINE_HEIGHT_RATIO, Empty, Flex, Hoverable, MouseStateHandle, OffsetPositioning,
-    ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack, Text,
+    ParentAnchor, ParentElement, ParentOffsetBounds, Radius, SavePosition, Stack, Text,
 };
 use warpui::fonts::{Cache, FamilyId, Properties, Weight};
 use warpui::keymap::Keystroke;
@@ -632,6 +632,10 @@ pub enum DisplayChipKind {
     AgentPlanAndTodoList {
         plan_and_todo_list: ViewHandle<PlanAndTodoListView>,
     },
+    DockerContext {
+        menu_open: bool,
+        menu: ViewHandle<DisplayChipMenu>,
+    },
     GitBranch {
         menu_open: bool,
         menu: ViewHandle<DisplayChipMenu>,
@@ -652,7 +656,8 @@ impl DisplayChipKind {
         match self {
             DisplayChipKind::WorkingDirectory { menu_open, .. } => *menu_open,
             DisplayChipKind::NodeVersion { popup_open, .. } => *popup_open,
-            DisplayChipKind::GitBranch { menu_open, .. }
+            DisplayChipKind::DockerContext { menu_open, .. }
+            | DisplayChipKind::GitBranch { menu_open, .. }
             | DisplayChipKind::GitBranchStatus { menu_open, .. } => *menu_open,
             DisplayChipKind::GithubPullRequest
             | DisplayChipKind::GitDiffStats { .. }
@@ -747,6 +752,27 @@ impl GenericMenuItem for GitBranch {
 
     fn icon(&self, _app: &AppContext) -> Option<Icon> {
         Some(self.icon_for_menu())
+    }
+
+    fn action_data(&self) -> String {
+        self.0.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DockerContext(String);
+
+impl GenericMenuItem for DockerContext {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn name(&self) -> String {
+        self.0.clone()
+    }
+
+    fn icon(&self, _app: &AppContext) -> Option<Icon> {
+        Some(Icon::Docker)
     }
 
     fn action_data(&self) -> String {
@@ -879,6 +905,37 @@ impl DisplayChip {
         menu_view
     }
 
+    fn docker_context_menu(
+        on_click_values: &[String],
+        ctx: &mut ViewContext<Self>,
+    ) -> ViewHandle<DisplayChipMenu> {
+        let items: Vec<_> = on_click_values
+            .iter()
+            .filter(|name| !name.is_empty())
+            .cloned()
+            .map(DockerContext)
+            .collect();
+        let menu = ctx.add_typed_action_view(|ctx| {
+            DisplayChipMenu::new(items, None, ChipMenuType::DockerContexts, ctx)
+        });
+        ctx.subscribe_to_view(&menu, |me, _, event, ctx| {
+            if let PromptDisplayMenuEvent::MenuAction(event) = event {
+                ctx.emit(PromptDisplayChipEvent::TryExecuteCommand(
+                    PromptChipShellCommand::DockerContextUse {
+                        context_name: event.action_item.action_data(),
+                    },
+                ));
+            }
+            if let DisplayChipKind::DockerContext { menu_open, menu } = &mut me.display_chip_kind {
+                *menu_open = false;
+                menu.update(ctx, |menu, _| menu.reset_selected_index());
+            }
+            ctx.emit(PromptDisplayChipEvent::ToggleMenu { open: false });
+            ctx.notify();
+        });
+        menu
+    }
+
     fn new_internal(
         chip_result: ChipResult,
         next_chip_kind: Option<ContextChipKind>,
@@ -920,6 +977,10 @@ impl DisplayChip {
 
                 DisplayChipKind::AgentPlanAndTodoList { plan_and_todo_list }
             }
+            ContextChipKind::DockerContext => DisplayChipKind::DockerContext {
+                menu_open: false,
+                menu: Self::docker_context_menu(&chip_result.on_click_values, ctx),
+            },
             ContextChipKind::ShellGitBranch => DisplayChipKind::GitBranch {
                 menu_open: false,
                 menu: Self::git_branch_menu(&chip_result.on_click_values, ctx),
@@ -1250,7 +1311,8 @@ impl DisplayChip {
                     return true;
                 }
             }
-            DisplayChipKind::GitBranch { menu_open, menu }
+            DisplayChipKind::DockerContext { menu_open, menu }
+            | DisplayChipKind::GitBranch { menu_open, menu }
             | DisplayChipKind::GitBranchStatus {
                 menu_open, menu, ..
             } => {
@@ -1372,7 +1434,7 @@ impl DisplayChip {
         }
     }
 
-    fn git_branch_chip(
+    fn context_menu_chip(
         &self,
         menu_open: bool,
         menu: &ViewHandle<DisplayChipMenu>,
@@ -1389,11 +1451,17 @@ impl DisplayChip {
             !self.is_shared_session_viewer && !self.is_cli_agent_session_active(app);
         let is_in_agent_view = self.is_in_agent_view;
         let chip_text = self.text.clone();
+        let (icon, tooltip) = match self.chip_kind {
+            ContextChipKind::DockerContext => (
+                Icon::Docker,
+                "Change saved Docker context (environment overrides take precedence)",
+            ),
+            _ => (Icon::GitBranch, "Change git branch"),
+        };
         let hover = Hoverable::new(self.mouse_state.clone(), move |state| {
             let hovered = state.is_hovered() && is_interactive;
-            let mut config =
-                UdiChipConfig::new_with_icon(Icon::GitBranch, font_color, chip_text.clone())
-                    .with_hovered(hovered);
+            let mut config = UdiChipConfig::new_with_icon(icon, font_color, chip_text.clone())
+                .with_hovered(hovered);
             if is_in_agent_view {
                 config = config.for_agent_view();
             }
@@ -1403,7 +1471,7 @@ impl DisplayChip {
             if state.is_hovered() && is_interactive && !menu_open {
                 let tool_tip = appearance
                     .ui_builder()
-                    .tool_tip("Change git branch".to_string())
+                    .tool_tip(tooltip.to_string())
                     .build()
                     .finish();
                 stack.add_positioned_overlay_child(tool_tip, udi_tooltip_positioning());
@@ -1416,7 +1484,7 @@ impl DisplayChip {
         } else {
             hover
                 .on_click(|ctx, _app, _position| {
-                    ctx.dispatch_typed_action(DisplayChipAction::OpenBranchSelector);
+                    ctx.dispatch_typed_action(DisplayChipAction::ToggleMenu);
                 })
                 .with_cursor(Cursor::PointingHand)
                 .finish()
@@ -2032,8 +2100,15 @@ impl DisplayChip {
             DisplayChipKind::AgentPlanAndTodoList { plan_and_todo_list } => {
                 Some(ChildView::new(plan_and_todo_list).finish())
             }
+            DisplayChipKind::DockerContext { menu_open, menu } => Some(
+                SavePosition::new(
+                    self.context_menu_chip(*menu_open, menu, app),
+                    "docker_context_chip",
+                )
+                .finish(),
+            ),
             DisplayChipKind::GitBranch { menu_open, menu } => {
-                Some(self.git_branch_chip(*menu_open, menu, app))
+                Some(self.context_menu_chip(*menu_open, menu, app))
             }
             DisplayChipKind::GitBranchStatus {
                 tracking_status,
@@ -2100,6 +2175,9 @@ pub enum PromptChipShellCommand {
     ChangeDirectory {
         dir_name: String,
     },
+    DockerContextUse {
+        context_name: String,
+    },
     NvmUse {
         version: String,
     },
@@ -2136,7 +2214,8 @@ impl TypedActionView for DisplayChip {
     fn handle_action(&mut self, action: &DisplayChipAction, ctx: &mut ViewContext<Self>) {
         match action {
             DisplayChipAction::CloseMenu => match &mut self.display_chip_kind {
-                DisplayChipKind::GitBranch { menu_open, menu }
+                DisplayChipKind::DockerContext { menu_open, menu }
+                | DisplayChipKind::GitBranch { menu_open, menu }
                 | DisplayChipKind::GitBranchStatus {
                     menu_open, menu, ..
                 } => {
@@ -2177,7 +2256,8 @@ impl TypedActionView for DisplayChip {
                     return;
                 }
                 match &mut self.display_chip_kind {
-                    DisplayChipKind::GitBranch { menu, menu_open }
+                    DisplayChipKind::DockerContext { menu, menu_open }
+                    | DisplayChipKind::GitBranch { menu, menu_open }
                     | DisplayChipKind::GitBranchStatus {
                         menu, menu_open, ..
                     } => {

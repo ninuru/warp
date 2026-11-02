@@ -988,6 +988,12 @@ fn render_prompt_chip_shell_command(
         PromptChipShellCommand::ChangeDirectory { dir_name } => {
             format!("cd {}", shell_quote_arg(dir_name, shell_type))
         }
+        PromptChipShellCommand::DockerContextUse { context_name } => {
+            format!(
+                "docker context use -- {}",
+                shell_quote_arg(context_name, shell_type)
+            )
+        }
         PromptChipShellCommand::NvmUse { version } => {
             format!("nvm use {}", shell_quote_arg(version, shell_type))
         }

@@ -246,6 +246,20 @@ pub fn shell_git_line_changes() -> ShellCommandGenerator {
     ShellCommandGenerator::new(command, Some(vec!["git".to_owned()]))
 }
 
+pub fn docker_current_context() -> ShellCommandGenerator {
+    ShellCommandGenerator::new(
+        ShellCommand::portable("docker context show"),
+        Some(vec!["docker".to_owned()]),
+    )
+}
+
+pub fn docker_contexts() -> ShellCommandGenerator {
+    ShellCommandGenerator::new(
+        ShellCommand::portable("docker context ls --format '{{.Name}}'"),
+        Some(vec!["docker".to_owned()]),
+    )
+}
+
 pub fn kubernetes_current_context() -> ShellCommandGenerator {
     ShellCommandGenerator::new(
         ShellCommand::portable("kubectl config current-context"),
