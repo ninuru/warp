@@ -47,6 +47,7 @@ use crate::terminal::shared_session::SharedSessionActionSource;
 use crate::terminal::view::RichContentSecretTooltipInfo;
 use crate::terminal::view::inline_banner::AgentModeSetupSpeedbumpBannerAction;
 use crate::terminal::view::passive_suggestions::PromptSuggestionResolution;
+use crate::view_components::find::FindDirection;
 use crate::workflows::workflow::Workflow;
 
 /// Version of the agent onboarding flow (non-legacy).
@@ -192,6 +193,10 @@ pub enum TerminalAction {
     CopyModeToggleVisual(SelectionType),
     CopyModeSwapAnchor,
     CopyModeYank,
+    CopyModeSearch(FindDirection),
+    CopyModeSearchNext {
+        reverse: bool,
+    },
     ExitCopyMode,
     UserInputSequence(Vec<u8>),
     ControlSequence(Vec<u8>),
@@ -569,6 +574,10 @@ impl fmt::Debug for TerminalAction {
             }
             CopyModeSwapAnchor => f.write_str("CopyModeSwapAnchor"),
             CopyModeYank => f.write_str("CopyModeYank"),
+            CopyModeSearch(direction) => write!(f, "CopyModeSearch({direction:?})"),
+            CopyModeSearchNext { reverse } => {
+                write!(f, "CopyModeSearchNext {{ reverse: {reverse} }}")
+            }
             ExitCopyMode => f.write_str("ExitCopyMode"),
             ContextMenu(action) => write!(f, "ContextMenu({action:?})"),
             CtrlD => f.write_str("CtrlD"),

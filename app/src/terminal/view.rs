@@ -546,7 +546,9 @@ use crate::util::openable_file_type::{
 use crate::util::repo_detection::{RepoDetectionSessionType, detect_possible_git_repo};
 use crate::util::truncation::truncate_from_end;
 use crate::view_components::action_button::{ActionButton, ButtonSize, KeystrokeSource};
-use crate::view_components::find::{Event as FindEvent, Find, FindDirection, FindWithinBlockState};
+use crate::view_components::find::{
+    Event as FindEvent, Find, FindDirection, FindModel as _, FindWithinBlockState,
+};
 use crate::view_components::{DismissibleToast, ToastFlavor};
 use crate::workflows::WorkflowSelectionSource;
 use crate::workflows::workflow::Workflow;
@@ -2563,6 +2565,7 @@ pub struct TerminalView {
 
     /// The search bar at the top of the terminal view.
     find_bar: ViewHandle<Find<TerminalFindModel>>,
+    copy_mode_search_direction: FindDirection,
 
     /// The block whose filter we are actively editing.
     active_filter_editor_block_index: Option<BlockIndex>,
@@ -4408,6 +4411,7 @@ impl TerminalView {
             server_api: resources.server_api.clone(),
             auth_state: AuthStateProvider::as_ref(ctx).get().clone(),
             find_bar,
+            copy_mode_search_direction: FindDirection::Down,
             resize_tx,
             pending_agent_scroll_target: None,
             find_link_tx,
@@ -20648,8 +20652,9 @@ impl TerminalView {
         }
         self.find_bar.update(ctx, |view, ctx| {
             let semantic_selection = SemanticSelection::as_ref(ctx);
-            if let Some(selected) =
-                model.selection_to_string(semantic_selection, inverted_blocklist, ctx)
+            if model.block_list().copy_mode().is_none()
+                && let Some(selected) =
+                    model.selection_to_string(semantic_selection, inverted_blocklist, ctx)
                 && !selected.is_empty()
             {
                 view.set_query_text(selected.as_str(), ctx);
@@ -23155,6 +23160,7 @@ impl TerminalView {
             FindEvent::CloseFindBar => {
                 self.close_find_bar(ctx);
                 self.redetermine_global_focus(ctx);
+                self.scroll_to_copy_mode_cursor(ctx);
             }
             FindEvent::Update { query } => {
                 let options = self
@@ -23165,6 +23171,11 @@ impl TerminalView {
                     .unwrap_or_default()
                     .with_query(query.clone());
                 self.run_find(options, ctx)
+            }
+            FindEvent::NextMatch { .. }
+                if self.is_in_copy_mode() && self.find_bar.as_ref(ctx).is_editor_focused(ctx) =>
+            {
+                self.submit_copy_mode_search(ctx)
             }
             FindEvent::NextMatch { direction } => self.goto_next_find_match(direction, ctx),
             FindEvent::ToggleFindInBlock { value } => self.toggle_find_within_block(ctx, *value),
@@ -24053,6 +24064,67 @@ impl TerminalView {
             ctx.clipboard().write(ClipboardContent::plain_text(text));
         }
         self.exit_copy_mode(ctx);
+    }
+
+    fn copy_mode_search(&mut self, direction: FindDirection, ctx: &mut ViewContext<Self>) {
+        if !self.is_in_copy_mode() {
+            return;
+        }
+        self.copy_mode_search_direction = direction;
+        self.show_find_bar(ctx);
+    }
+
+    fn copy_mode_search_next(&mut self, reverse: bool, ctx: &mut ViewContext<Self>) {
+        if !self.is_in_copy_mode() || !self.find_model.as_ref(ctx).is_find_bar_open() {
+            return;
+        }
+        let direction = match (self.copy_mode_search_direction, reverse) {
+            (direction, false) => direction,
+            (FindDirection::Down, true) => FindDirection::Up,
+            (FindDirection::Up, true) => FindDirection::Down,
+        };
+        self.find_model.update(ctx, |find_model, ctx| {
+            find_model.focus_next_find_match(direction, ctx);
+        });
+        self.copy_mode_jump_to_focused_match(direction, ctx);
+    }
+
+    fn submit_copy_mode_search(&mut self, ctx: &mut ViewContext<Self>) {
+        self.copy_mode_jump_to_focused_match(self.copy_mode_search_direction, ctx);
+        self.focus_terminal(ctx);
+    }
+
+    fn copy_mode_jump_to_focused_match(
+        &mut self,
+        direction: FindDirection,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let match_count = self.find_model.as_ref(ctx).match_count();
+        let target = (0..match_count).find_map(|step| {
+            if step > 0 {
+                self.find_model.update(ctx, |find_model, ctx| {
+                    find_model.focus_next_find_match(direction, ctx);
+                });
+            }
+            let focused_match = self
+                .find_model
+                .as_ref(ctx)
+                .focused_original_block_list_match()?;
+            self.model
+                .lock()
+                .block_list()
+                .copy_mode_match_point(&focused_match)
+        });
+        if target.is_none() {
+            return;
+        }
+        let inverted = self.is_inverted_blocklist(ctx);
+        self.model
+            .lock()
+            .block_list_mut()
+            .copy_mode_move_to(target, inverted);
+        self.scroll_to_copy_mode_cursor(ctx);
+        ctx.notify();
     }
 
     fn exit_copy_mode(&mut self, ctx: &mut ViewContext<Self>) {
@@ -27908,6 +27980,8 @@ impl TypedActionView for TerminalView {
             | CopyModeToggleVisual(_)
             | CopyModeSwapAnchor
             | CopyModeYank
+            | CopyModeSearch(_)
+            | CopyModeSearchNext { .. }
             | ExitCopyMode
             | ContextMenu(_)
             | SplitRight(_)
@@ -28278,6 +28352,8 @@ impl TypedActionView for TerminalView {
             }
             CopyModeSwapAnchor => self.copy_mode_swap_anchor(ctx),
             CopyModeYank => self.copy_mode_yank(ctx),
+            CopyModeSearch(direction) => self.copy_mode_search(*direction, ctx),
+            CopyModeSearchNext { reverse } => self.copy_mode_search_next(*reverse, ctx),
             ExitCopyMode => self.exit_copy_mode(ctx),
             SelectBookmarkUp => match input_mode {
                 InputMode::PinnedToBottom | InputMode::Waterfall => self.bookmark_up(ctx),
@@ -29811,12 +29887,14 @@ impl View for TerminalView {
             // Make sure to close link tooltips when terminal view is not in focus.
             self.open_grid_link_tool_tip.take();
 
-            if self.is_in_copy_mode() {
-                self.clear_selected_text(ctx);
-            }
-
             self.maybe_report_focus_out(ctx);
             ctx.notify();
+        }
+        if self.is_in_copy_mode()
+            && !ctx.is_self_focused()
+            && !self.find_bar.is_self_or_child_focused(ctx)
+        {
+            self.clear_selected_text(ctx);
         }
     }
 
@@ -29845,7 +29923,9 @@ impl View for TerminalView {
             context.set.insert("VoltronActive");
         }
 
-        if model_lock.block_list().copy_mode().is_some() {
+        if model_lock.block_list().copy_mode().is_some()
+            && !self.find_bar.as_ref(app).is_editor_focused(app)
+        {
             context.set.insert("CopyMode");
         }
 
