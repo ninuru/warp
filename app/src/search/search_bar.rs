@@ -32,6 +32,8 @@ use crate::ui_components::icons::Icon;
 pub type CreateQueryResultRendererFn<T> =
     fn(QueryResultIndex, QueryResult<T>) -> QueryResultRenderer<T>;
 
+type ResultIdentityFn<T> = fn(&QueryResult<T>) -> Option<String>;
+
 enum SearchResultLimit {
     /// Search results are unbounded.
     Unbounded,
@@ -88,6 +90,8 @@ pub struct SearchBarState<T: Action + Clone> {
 
     /// The offset to apply to the initial selection when the search bar is opened.
     offset_initial_selection_by: isize,
+    result_identity_fn: Option<ResultIdentityFn<T>>,
+    last_results_query: Option<Query>,
 }
 
 /// Ordering of search results.
@@ -152,12 +156,20 @@ impl<T: Action + Clone> SearchBarState<T> {
             max_results: SearchResultLimit::Unbounded,
             run_query_on_buffer_empty: false,
             offset_initial_selection_by: 0,
+            result_identity_fn: None,
+            last_results_query: None,
         }
     }
 
     /// Bounds the number of results returned by the mixer to `max_results`.
     pub fn with_max_results(mut self, max_results: usize) -> Self {
         self.max_results = SearchResultLimit::Bounded { max_results };
+        self
+    }
+
+    /// Preserves identified results when the same query receives a refreshed result set.
+    pub fn with_result_identity_fn(mut self, identity: ResultIdentityFn<T>) -> Self {
+        self.result_identity_fn = Some(identity);
         self
     }
 
@@ -522,6 +534,7 @@ impl<T: Action + Clone> SearchBar<T> {
 
         self.state.update(ctx, |state, ctx| {
             state.ordering = ordering;
+            state.last_results_query = None;
 
             state.query_filter = query_filter;
 
@@ -651,7 +664,16 @@ impl<T: Action + Clone> SearchBar<T> {
     }
 
     fn on_mixer_results_changed(&mut self, ctx: &mut ViewContext<Self>) {
-        let results = self.mixer.read(ctx, |mixer, _ctx| mixer.results().clone());
+        let (query, results) = self.mixer.read(ctx, |mixer, _ctx| {
+            (mixer.current_query().cloned(), mixer.results().clone())
+        });
+        let previous_selection = self.state.read(ctx, |state, _| {
+            if query.is_none() || state.last_results_query.as_ref() != query.as_ref() {
+                return None;
+            }
+            let identity = state.result_identity_fn?(state.selected_result()?)?;
+            Some((identity, state.selected_index?))
+        });
         let create_query_result_renderer = self.create_query_result_renderer_fn;
 
         let (selection_start, query_results) = match self.state.as_ref(ctx).ordering {
@@ -675,12 +697,35 @@ impl<T: Action + Clone> SearchBar<T> {
             .map(|(index, result)| create_query_result_renderer(index, result))
             .collect_vec();
 
+        let preserved_selection = previous_selection.and_then(|(identity, index)| {
+            if query_result_renderers.is_empty() {
+                return Some(None);
+            }
+            let identity_fn = self.state.as_ref(ctx).result_identity_fn?;
+            let identities = query_result_renderers
+                .iter()
+                .map(|renderer| identity_fn(&renderer.search_result))
+                .collect_vec();
+            refreshed_selection_index(&identity, index, &identities).map(Some)
+        });
+
         self.state.update(ctx, |state, ctx| {
             state.query_result_renderers = Some(query_result_renderers);
+            state.last_results_query = query;
+            if let Some(index) = preserved_selection {
+                state.selected_index = index;
+                if let Some(index) = index {
+                    ctx.emit(SearchBarEvent::ResultSelected { index });
+                }
+            }
             ctx.notify();
         });
 
-        self.handle_selection_update(selection_start, ctx);
+        if preserved_selection.is_none() {
+            self.handle_selection_update(selection_start, ctx);
+        } else {
+            self.emit_accessibility_content(ctx);
+        }
 
         // Re-render the view with the updated results.
         ctx.notify();
@@ -937,3 +982,25 @@ impl<T: Action + Clone> SearchBar<T> {
         self.state.as_ref(app).active_query_filter()
     }
 }
+
+fn refreshed_selection_index(
+    selected_identity: &str,
+    selected_index: usize,
+    result_identities: &[Option<String>],
+) -> Option<usize> {
+    result_identities
+        .iter()
+        .position(|identity| identity.as_deref() == Some(selected_identity))
+        .or_else(|| {
+            let last_index = result_identities.len().checked_sub(1)?;
+            let clamped_index = selected_index.min(last_index);
+            (0..=clamped_index)
+                .rev()
+                .chain(clamped_index + 1..result_identities.len())
+                .find(|&index| result_identities[index].is_some())
+        })
+}
+
+#[cfg(test)]
+#[path = "search_bar_tests.rs"]
+mod tests;

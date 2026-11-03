@@ -10,9 +10,10 @@ use warp_util::path::LineAndColumnArg;
 use warpui::elements::{
     Align, Border, ChildView, Clipped, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
     Container, CornerRadius, Dismiss, DispatchEventResult, Empty, EventHandler, Fill, Flex,
-    ParentElement, Radius, SavePosition, Shrinkable,
+    ParentElement, Radius, SavePosition, Shrinkable, Text,
 };
 use warpui::event::KeyState;
+use warpui::fonts::{Properties, Weight};
 use warpui::keymap::BindingId;
 use warpui::platform::keyboard::KeyCode;
 use warpui::units::{IntoPixels, Pixels};
@@ -209,7 +210,11 @@ impl warpui::View for View {
                             .with_max_height(styles::PALETTE_HEIGHT)
                             .finish(),
                     )
-                    .with_background(theme.surface_2())
+                    .with_background(if self.is_picker(app) {
+                        theme.surface_1()
+                    } else {
+                        theme.surface_2()
+                    })
                     .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
                     .with_border(Border::all(1.0).with_border_fill(theme.outline()))
                     .with_margin_top(117.)
@@ -243,7 +248,9 @@ impl warpui::View for View {
 impl View {
     pub fn new(navigation_mode: NavigationMode, ctx: &mut ViewContext<Self>) -> Self {
         let search_bar_state = ctx.add_model(|_ctx| {
-            SearchBarState::new(SearchResultOrdering::TopDown).with_max_results(MAX_SEARCH_RESULTS)
+            SearchBarState::new(SearchResultOrdering::TopDown)
+                .with_max_results(MAX_SEARCH_RESULTS)
+                .with_result_identity_fn(Self::picker_result_identity)
         });
 
         ctx.subscribe_to_model(&search_bar_state, |me, _, event, ctx| {
@@ -412,10 +419,6 @@ impl View {
                 | (PaletteMode::Conversations, QueryFilter::Conversations)
                 | (PaletteMode::WarpDrive, QueryFilter::Drive)
                 | (PaletteMode::ProjectSessions, QueryFilter::ProjectSessions)
-                | (
-                    PaletteMode::OpenProjectSessions,
-                    QueryFilter::ProjectSessions
-                )
         )
     }
 
@@ -451,17 +454,33 @@ impl View {
         }
     }
 
+    fn picker_result_identity(result: &QueryResult<CommandPaletteItemAction>) -> Option<String> {
+        match result.accept_result() {
+            CommandPaletteItemAction::NavigateToSession {
+                window_id,
+                pane_view_locator,
+            } => Some(format!("session:{window_id:?}:{pane_view_locator:?}")),
+            CommandPaletteItemAction::SwitchProject { path } => Some(format!("project:{path:?}")),
+            _ => None,
+        }
+    }
+
     fn create_query_result_renderer(
         index: usize,
         result: QueryResult<CommandPaletteItemAction>,
     ) -> QueryResultRenderer<CommandPaletteItemAction> {
+        let styles = if Self::picker_result_identity(&result).is_some() {
+            *styles::PICKER_QUERY_RESULT_RENDERER_STYLES
+        } else {
+            *styles::QUERY_RESULT_RENDERER_STYLES
+        };
         QueryResultRenderer::new(
             result,
             Self::query_result_save_position_id(index),
             |_result_index, action, event_ctx| {
                 event_ctx.dispatch_typed_action(Action::ResultClicked { action })
             },
-            *styles::QUERY_RESULT_RENDERER_STYLES,
+            styles,
         )
     }
 
@@ -711,9 +730,58 @@ impl View {
         })
     }
 
+    fn is_picker(&self, app: &AppContext) -> bool {
+        matches!(
+            self.active_query_filter(app),
+            Some(QueryFilter::Sessions | QueryFilter::ProjectSessions)
+        )
+    }
+
+    fn render_picker_empty_state(&self, app: &AppContext) -> Box<dyn Element> {
+        let appearance = Appearance::as_ref(app);
+        let background = appearance.theme().surface_1();
+        let title = match self.active_query_filter(app) {
+            Some(QueryFilter::Sessions) => "No matching sessions",
+            _ => "No matching projects",
+        };
+        Container::new(
+            Flex::column()
+                .with_child(
+                    Text::new_inline(
+                        title,
+                        appearance.ui_font_family(),
+                        appearance.monospace_font_size(),
+                    )
+                    .with_color(appearance.theme().main_text_color(background).into_solid())
+                    .with_style(Properties::default().weight(Weight::Semibold))
+                    .finish(),
+                )
+                .with_child(
+                    Container::new(
+                        Text::new_inline(
+                            "Try another name or path.",
+                            appearance.ui_font_family(),
+                            appearance.monospace_font_size(),
+                        )
+                        .with_color(appearance.theme().sub_text_color(background).into_solid())
+                        .finish(),
+                    )
+                    .with_margin_top(4.)
+                    .finish(),
+                )
+                .finish(),
+        )
+        .with_horizontal_padding(styles::RESULT_PADDING_HORIZONTAL)
+        .with_vertical_padding(20.)
+        .finish()
+    }
+
     fn render_palette_list(&self, theme: &WarpTheme, app: &AppContext) -> Box<dyn Element> {
         match self.search_bar_state.as_ref(app).query_result_renderers() {
             None => Empty::new().finish(),
+            Some(renderers) if renderers.is_empty() && self.is_picker(app) => {
+                self.render_picker_empty_state(app)
+            }
             Some(renderers) if renderers.is_empty() => {
                 self.placeholder_query_renderer
                     .render(0, true /* is_selected */, app)

@@ -1,7 +1,7 @@
 use pathfinder_geometry::vector::vec2f;
 use warpui::elements::{
-    Align, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Flex, Highlight,
-    ParentElement, Radius, Shrinkable, Wrap,
+    Align, Border, Clipped, ConstrainedBox, Container, CrossAxisAlignment, Expanded, Flex,
+    Highlight, ParentElement, Shrinkable, Text, Wrap,
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
@@ -36,23 +36,15 @@ pub fn render_navigation_session(
     highlight_indices: &SessionHighlightIndices,
     app: &AppContext,
 ) -> Box<dyn Element> {
-    render_navigation_session_internal(
-        render_session_label(
-            session,
-            appearance,
-            item_highlight_state,
-            is_active_session,
-            highlight_indices,
-            app,
-        )
-        .finish(),
+    render_session_label(
+        session,
+        appearance,
+        item_highlight_state,
+        is_active_session,
+        highlight_indices,
+        app,
     )
-}
-
-fn render_navigation_session_internal(label: Box<dyn Element>) -> Box<dyn Element> {
-    ConstrainedBox::new(label)
-        .with_height(styles::NAVIGATION_PALETTE_ITEM_HEIGHT)
-        .finish()
+    .finish()
 }
 
 fn render_session_label(
@@ -70,24 +62,41 @@ fn render_session_label(
     } else if let Some(snapshot) = &session.prompt_elements().prompt_chip_snapshot {
         render_prompt_udi(snapshot, appearance)
     } else {
-        // Fallback: empty container if neither is available (e.g. very early startup).
-        Container::new(Flex::row().finish()).finish()
+        Text::new_inline(
+            "Terminal session",
+            appearance.ui_font_family(),
+            appearance.monospace_font_size(),
+        )
+        .with_color(item_highlight_state.main_text_fill(appearance).into_solid())
+        .finish()
     };
 
     let command_info = render_command_context(
         session,
         item_highlight_state,
-        is_active_session,
         highlight_indices.command_indices.clone(),
         highlight_indices.hint_text_indices.clone(),
         appearance,
     );
 
-    navigation_palette_item.add_child(
-        Container::new(prompt)
-            .with_margin_right(styles::NAVIGATION_PALETTE_ROW_HORIZONTAL_SPACING)
+    let prompt_height = appearance.monospace_font_size() * appearance.line_height_ratio() + 4.;
+    let mut header = Flex::row()
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_child(
+            Expanded::new(
+                1.,
+                ConstrainedBox::new(Clipped::new(prompt).finish())
+                    .with_height(prompt_height)
+                    .finish(),
+            )
             .finish(),
-    );
+        );
+    header.add_child(render_current_session_status(
+        is_active_session,
+        item_highlight_state,
+        appearance,
+    ));
+    navigation_palette_item.add_child(header.finish());
 
     navigation_palette_item.add_child(
         Container::new(command_info)
@@ -99,49 +108,29 @@ fn render_session_label(
     navigation_palette_item
 }
 
-fn render_current_session_pill(
-    command_context: CommandContext,
+fn render_current_session_status(
+    is_active_session: bool,
+    item_highlight_state: ItemHighlightState,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
-    let current_session_pill = appearance
-        .ui_builder()
-        .span("Current".to_string())
-        .with_style(UiComponentStyles {
-            font_family_id: Some(appearance.monospace_font_family()),
-            // The font size is scaled down to make sure the pill fits in the row with its padding.
-            font_size: Some(appearance.monospace_font_size() * 0.85),
-            font_color: Some(
-                appearance
-                    .theme()
-                    .main_text_color(appearance.theme().background())
-                    .into_solid(),
-            ),
-            ..Default::default()
-        })
-        .build()
-        .with_padding_left(5.)
-        .with_padding_right(5.)
-        .with_margin_left(10.)
-        .with_margin_right(8.)
-        .with_background_color(appearance.theme().background().into_solid())
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)))
-        .finish();
-
-    Shrinkable::new(
-        // We need different flex values when different hint texts are present, otherwise the actual command won't take up enough room.
-        match command_context {
-            CommandContext::LastRunCommand { .. } | CommandContext::LastRunAIBlock { .. } => 0.5,
-            CommandContext::RunningCommand { .. } | CommandContext::RunningAIBlock { .. } => 0.35,
-            CommandContext::None => 1.,
-        },
-        Align::new(
-            ConstrainedBox::new(current_session_pill)
-                .with_max_width(135.)
+    Container::new(
+        ConstrainedBox::new(
+            Align::new(
+                Text::new_inline(
+                    if is_active_session { "Current" } else { "" },
+                    appearance.ui_font_family(),
+                    appearance.monospace_font_size() - 1.,
+                )
+                .with_color(item_highlight_state.sub_text_fill(appearance).into_solid())
                 .finish(),
+            )
+            .right()
+            .finish(),
         )
-        .right()
+        .with_width(64. * appearance.monospace_ui_scalar())
         .finish(),
     )
+    .with_margin_left(8.)
     .finish()
 }
 
@@ -244,7 +233,6 @@ fn render_prompt_ps1(
 fn render_command_context(
     session: &SessionNavigationData,
     item_highlight_state: ItemHighlightState,
-    is_active_session: bool,
     command_indices: Option<Vec<usize>>,
     hint_text_indices: Vec<usize>,
     appearance: &Appearance,
@@ -313,14 +301,7 @@ fn render_command_context(
             .finish(),
     );
 
-    if is_active_session {
-        command_row.add_child(render_current_session_pill(
-            session.command_context(),
-            appearance,
-        ));
-    }
-
-    command_row = command_row.with_cross_axis_alignment(CrossAxisAlignment::End);
+    command_row = command_row.with_cross_axis_alignment(CrossAxisAlignment::Center);
 
     command_row.finish()
 }
@@ -337,7 +318,7 @@ impl CommandRenderInfo {
         match command_context {
             CommandContext::RunningCommand { running_command } => CommandRenderInfo {
                 command_text: Some(running_command),
-                hint_text: "Running...".to_string(),
+                hint_text: "Running".to_string(),
                 row_spacing: styles::NAVIGATION_PALETTE_COMMAND_ROW_SPACING,
                 hint_margin: styles::NAVIGATION_PALETTE_COMMAND_HINT_MARGIN,
             },
@@ -356,14 +337,15 @@ impl CommandRenderInfo {
                 command_text: Some(last_run_command),
                 hint_text: match mins_since_completion {
                     Some(mins) if mins >= 60 => "Completed over 1 hour ago".to_string(),
+                    Some(0) => "Completed just now".to_string(),
                     Some(mins) if mins == 1 => format!("Completed {mins} minute ago"),
                     Some(mins) => format!("Completed {mins} minutes ago"),
-                    None => "No timestamp found".to_string(),
+                    None => "Completed".to_string(),
                 },
             },
             CommandContext::RunningAIBlock { prompt } => CommandRenderInfo {
                 command_text: Some(prompt),
-                hint_text: "Running...".to_string(),
+                hint_text: "Running".to_string(),
                 row_spacing: styles::NAVIGATION_PALETTE_COMMAND_ROW_SPACING,
                 hint_margin: styles::NAVIGATION_PALETTE_COMMAND_HINT_MARGIN,
             },
@@ -375,7 +357,7 @@ impl CommandRenderInfo {
             },
             CommandContext::None => CommandRenderInfo {
                 command_text: Some(String::new()),
-                hint_text: "Empty Session".to_string(),
+                hint_text: "No commands yet".to_string(),
                 row_spacing: 0.,
                 hint_margin: 0.,
             },
@@ -384,8 +366,6 @@ impl CommandRenderInfo {
 }
 
 mod styles {
-    pub const NAVIGATION_PALETTE_ITEM_HEIGHT: f32 = 70.;
-
     pub const NAVIGATION_PALETTE_ROW_VERTICAL_SPACING: f32 = 4.;
 
     pub const NAVIGATION_PALETTE_ROW_HORIZONTAL_SPACING: f32 = 5.;

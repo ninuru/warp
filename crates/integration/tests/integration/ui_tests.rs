@@ -390,7 +390,7 @@ integration_tests! {
     // Regression: Enter must accept inline menus (not insert newline) when toggle=true
     test_rich_input_enter_accepts_menu_item_when_toggle_is_true,
 
-    test_prefix_lists_only_open_projects,
+    test_prefix_session_and_project_pickers,
     test_prefix_new_tab,
     test_prefix_split_right,
     test_prefix_twice_passes_through,

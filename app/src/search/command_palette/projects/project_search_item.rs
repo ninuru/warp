@@ -1,29 +1,33 @@
+use std::time::Duration;
+
 use fuzzy_match::FuzzyMatchResult;
 use ordered_float::OrderedFloat;
-use warp_core::ui::theme::Fill;
 use warpui::elements::{
-    Align, ConstrainedBox, Container, CrossAxisAlignment, Flex, Highlight, ParentElement,
-    Shrinkable, Text,
+    Align, ChildAnchor, ConstrainedBox, Container, CrossAxisAlignment, Empty, Expanded, Flex,
+    Highlight, Hoverable, MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, Stack, Text,
 };
 use warpui::fonts::{Properties, Weight};
+use warpui::geometry::vector::vec2f;
+use warpui::text_layout::ClipConfig;
+use warpui::ui_components::components::UiComponent;
 use warpui::{AppContext, Element, SingletonEntity};
 
 use super::ProjectCandidate;
 use crate::appearance::Appearance;
-use crate::search::action::search_item::styles;
 use crate::search::command_palette::mixer::CommandPaletteItemAction;
 use crate::search::command_palette::render_util;
-use crate::search::item::SearchItem;
+use crate::search::item::{IconLocation, SearchItem};
 use crate::search::result_renderer::ItemHighlightState;
 use crate::ui_components::icons::Icon as UiIcon;
 
-const OPEN_BADGE: &str = "open";
+const OPEN_BADGE: &str = "Open";
 const LABEL_SPACING: f32 = 8.;
 
-#[derive(Debug)]
 pub struct ProjectSearchItem {
     pub candidate: ProjectCandidate,
     pub match_result: FuzzyMatchResult,
+    pub(super) tooltip_state: MouseStateHandle,
 }
 
 fn label_text(
@@ -50,6 +54,7 @@ impl ProjectSearchItem {
             item_highlight_state,
             appearance,
         )
+        .with_clip(ClipConfig::start())
         .with_single_highlight(
             Highlight::new()
                 .with_properties(Properties::default().weight(Weight::Bold))
@@ -68,25 +73,64 @@ impl ProjectSearchItem {
     ) -> Box<dyn Element> {
         let name = label_text(&self.candidate.name, item_highlight_state, appearance)
             .with_color(item_highlight_state.main_text_fill(appearance).into_solid())
-            .with_style(Properties::default().weight(Weight::Bold))
+            .with_style(Properties::default().weight(Weight::Semibold))
+            .with_clip(ClipConfig::ellipsis())
             .finish();
-        let path = Container::new(self.render_path(item_highlight_state, appearance))
-            .with_margin_left(LABEL_SPACING)
+        let status = if self.candidate.is_open {
+            Align::new(label_text(OPEN_BADGE, item_highlight_state, appearance).finish())
+                .right()
+                .finish()
+        } else {
+            Empty::new().finish()
+        };
+        let header = Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(Expanded::new(1., name).finish())
+            .with_child(
+                Container::new(
+                    ConstrainedBox::new(status)
+                        .with_width(48. * appearance.monospace_ui_scalar())
+                        .finish(),
+                )
+                .with_margin_left(LABEL_SPACING)
+                .finish(),
+            )
             .finish();
-
-        let mut row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
-        row.add_child(name);
-        row.add_child(Shrinkable::new(1., Align::new(path).left().finish()).finish());
-        if self.candidate.is_open {
-            row.add_child(
-                Container::new(label_text(OPEN_BADGE, item_highlight_state, appearance).finish())
-                    .with_margin_left(LABEL_SPACING)
+        let path = Hoverable::new(self.tooltip_state.clone(), |mouse| {
+            let path = self.render_path(item_highlight_state, appearance);
+            if !mouse.is_hovered() {
+                return path;
+            }
+            let tooltip = ConstrainedBox::new(
+                appearance
+                    .ui_builder()
+                    .tool_tip(format!(
+                        "{}\n{}",
+                        self.candidate.name,
+                        self.candidate.root.display()
+                    ))
+                    .build()
                     .finish(),
+            )
+            .with_max_width(480. * appearance.monospace_ui_scalar())
+            .finish();
+            let mut stack = Stack::new().with_child(path);
+            stack.add_positioned_overlay_child(
+                tooltip,
+                OffsetPositioning::offset_from_parent(
+                    vec2f(0., 4.),
+                    ParentOffsetBounds::WindowByPosition,
+                    ParentAnchor::BottomLeft,
+                    ChildAnchor::TopLeft,
+                ),
             );
-        }
-
-        ConstrainedBox::new(row.finish())
-            .with_height(styles::SEARCH_ITEM_HEIGHT)
+            stack.finish()
+        })
+        .with_hover_in_delay(Duration::from_millis(400))
+        .finish();
+        Flex::column()
+            .with_child(header)
+            .with_child(Container::new(path).with_margin_top(4.).finish())
             .finish()
     }
 }
@@ -94,17 +138,25 @@ impl ProjectSearchItem {
 impl SearchItem for ProjectSearchItem {
     type Action = CommandPaletteItemAction;
 
+    fn is_multiline(&self) -> bool {
+        true
+    }
+
+    fn icon_location(&self, appearance: &Appearance) -> IconLocation {
+        IconLocation::Top {
+            margin_top: (appearance.line_height_ratio() - 1.) * appearance.monospace_font_size(),
+        }
+    }
+
     fn render_icon(
         &self,
         highlight_state: ItemHighlightState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let icon_color: Fill = appearance.theme().terminal_colors().normal.cyan.into();
-
         render_util::render_search_item_icon(
             appearance,
             UiIcon::Folder,
-            icon_color.into_solid(),
+            highlight_state.icon_fill(appearance).into_solid(),
             highlight_state,
         )
     }
@@ -137,6 +189,10 @@ impl SearchItem for ProjectSearchItem {
     }
 
     fn accessibility_label(&self) -> String {
-        format!("Project: {}", self.candidate.display_path)
+        format!(
+            "Project: {}. {}",
+            self.candidate.name,
+            self.candidate.root.display()
+        )
     }
 }

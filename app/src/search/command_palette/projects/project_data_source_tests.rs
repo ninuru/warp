@@ -74,3 +74,22 @@ fn rank_keeps_merge_order_for_empty_query_and_fuzzy_matches_display_path() {
         CommandPaletteItemAction::SwitchProject { path } if path == warp
     ));
 }
+
+#[test]
+fn renamed_projects_match_their_visible_name_without_highlighting_the_path() {
+    let candidates = merge_candidates(
+        &[ProjectRef {
+            root: PathBuf::from("/home/u/projects/api"),
+            name: "Customer Portal".to_string(),
+        }],
+        Path::new(HOME),
+        vec![],
+        Path::new(HOME),
+    );
+
+    let matched = rank_candidates(&candidates, "portal");
+
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0].candidate.name, "Customer Portal");
+    assert!(matched[0].match_result.matched_indices.is_empty());
+}

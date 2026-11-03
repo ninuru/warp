@@ -29,7 +29,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     (",", "workspace:rename_active_tab"),
     ("f", "workspace:open_project_picker"),
     ("l", "workspace:switch_to_previous_project"),
-    ("s", "workspace:list_open_projects"),
+    ("s", "workspace:toggle_navigation_palette"),
     ("$", "workspace:rename_project"),
     ("[", "terminal:enter_copy_mode"),
 ];
