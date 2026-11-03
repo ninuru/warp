@@ -14,6 +14,7 @@ use crate::workspace::tab_settings::TabSettings;
 use crate::workspace::view::projects::{ProjectRef, project_name};
 
 const OPEN_PROJECT_SCORE_FACTOR: i64 = 2;
+const MATCH_SCORE_SCALE: i64 = 1_000;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectCandidate {
@@ -86,6 +87,8 @@ pub fn rank_candidates(candidates: &[ProjectCandidate], query: &str) -> Vec<Proj
                         })
                     })
                     .map(|mut match_result| {
+                        match_result.score = match_result.score * MATCH_SCORE_SCALE
+                            - candidate.display_path.chars().count() as i64;
                         if candidate.is_open {
                             match_result.score *= OPEN_PROJECT_SCORE_FACTOR;
                         }
