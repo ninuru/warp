@@ -49,6 +49,7 @@ use warpui::{
     Action, AppContext, Element, Entity, ModelHandle, SingletonEntity, TypedActionView,
     UpdateView as _, View, ViewContext, ViewHandle, id,
 };
+use zen_mode_page::{ZenModePageAction, ZenModeSettingsPageView};
 
 use self::telemetry::SettingsTelemetryEvent;
 use crate::ai::custom_model_routers::CustomModelRouter;
@@ -124,6 +125,7 @@ pub mod update_environment_form;
 mod warp_agent_page;
 mod warp_drive_page;
 mod warpify_page;
+mod zen_mode_page;
 
 pub(crate) use admin_actions::AdminActions;
 #[cfg(feature = "tui")]
@@ -324,6 +326,7 @@ pub enum SettingsSection {
     Teams,
     WarpDrive,
     Warpify,
+    ZenMode,
     // ── Agents umbrella subpages ──
     WarpAgent,
     AgentProfiles,
@@ -349,6 +352,7 @@ impl Display for SettingsSection {
             SettingsSection::Keybindings => write!(f, "Keyboard shortcuts"),
             SettingsSection::SharedBlocks => write!(f, "Shared blocks"),
             SettingsSection::Scripting => write!(f, "Scripting"),
+            SettingsSection::ZenMode => write!(f, "Zen Mode"),
             SettingsSection::WarpDrive => write!(f, "Warp Drive"),
             SettingsSection::WarpAgent => write!(f, "Warp Agent"),
             SettingsSection::AgentProfiles => write!(f, "Profiles"),
@@ -393,6 +397,7 @@ impl SettingsSection {
             Self::Teams => "Teams",
             Self::WarpDrive => "Warp Drive",
             Self::Warpify => "Warpify",
+            Self::ZenMode => "Zen Mode",
             Self::WarpAgent => "Warp Agent",
             Self::AgentProfiles => "Profiles",
             Self::AgentMCPServers => "MCP servers",
@@ -429,6 +434,7 @@ impl SettingsSection {
             "Teams" => Self::Teams,
             "Warp Drive" | "WarpDrive" => Self::WarpDrive,
             "Warpify" => Self::Warpify,
+            "Zen Mode" => Self::ZenMode,
             // "Oz" and "AI" are older names for what is now the Warp Agent page.
             "Warp Agent" | "Oz" | "AI" => Self::WarpAgent,
             "Profiles" | "AgentProfiles" => Self::AgentProfiles,
@@ -563,7 +569,10 @@ pub mod flags {
     pub const SESSION_CONFIG_TAB_CONFIG_CHIP_OPEN: &str = "Session_Config_Tab_Config_Chip_Open";
     pub const FEATURE_INTRO_MODAL_OPEN: &str = "Feature_Intro_Modal_Open";
     pub const FOCUS_PANES_ON_HOVER_CONTEXT_FLAG: &str = "Focus_Panes_On_Hover";
-    pub const HIDE_WORKSPACE_DECORATIONS_CONTEXT_FLAG: &str = "Hide_Workspace_Decorations";
+    pub const ZEN_MODE_ENTER_FULLSCREEN_FLAG: &str = "Zen_Mode_Enter_Fullscreen";
+    pub const ZEN_MODE_REVEAL_TAB_BAR_ON_HOVER_FLAG: &str = "Zen_Mode_Reveal_Tab_Bar_On_Hover";
+    pub const ZEN_MODE_HIDE_PANELS_FLAG: &str = "Zen_Mode_Hide_Panels";
+    pub const ZEN_MODE_FOLLOW_WINDOW_FULLSCREEN_FLAG: &str = "Zen_Mode_Follow_Window_Fullscreen";
     pub const ALIAS_EXPANSION_FLAG: &str = "Alias_Expansion_Enabled";
     pub const MIDDLE_CLICK_PASTE_FLAG: &str = "Middle_Click_Paste_Enabled";
     pub const CODE_AS_DEFAULT_EDITOR: &str = "Code_As_Default_Enabled";
@@ -692,6 +701,7 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     code_indexing_page::init_actions_from_parent_view(app, context, builder);
     code_editor_review_page::init_actions_from_parent_view(app, context, builder);
     warp_drive_page::init_actions_from_parent_view(app, context, builder);
+    zen_mode_page::init_actions_from_parent_view(app, context, builder);
 
     if ChannelState::enable_debug_features() || cfg!(windows) {
         ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
@@ -1001,6 +1011,7 @@ pub enum SettingsAction {
     EditorAndCodeReview(EditorAndCodeReviewPageAction),
     WarpDrive(warp_drive_page::WarpDriveSettingsPageAction),
     WarpifyPageToggle(WarpifyPageAction),
+    ZenModePageToggle(ZenModePageAction),
     Tab,
     Split(Direction),
     ToggleMaximizePane,
@@ -1153,6 +1164,7 @@ macro_rules! update_page {
             SettingsPageViewHandle::Privacy(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Referrals(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Scripting(handle) => $ctx.update_view(handle, $update),
+            SettingsPageViewHandle::ZenMode(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::WarpAgent(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::AgentProfiles(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Knowledge(handle) => $ctx.update_view(handle, $update),
@@ -1325,6 +1337,11 @@ impl SettingsView {
         } else {
             None
         };
+        let zen_mode_page_handle = if FeatureFlag::FullScreenZenMode.is_enabled() {
+            Some(ctx.add_typed_action_view(ZenModeSettingsPageView::new))
+        } else {
+            None
+        };
 
         // Warp Drive page
         let warp_drive_page_handle =
@@ -1396,6 +1413,10 @@ impl SettingsView {
             settings_pages.push(SettingsPage::new(scripting_page_handle));
         }
 
+        if let Some(zen_mode_page_handle) = zen_mode_page_handle {
+            settings_pages.push(SettingsPage::new(zen_mode_page_handle));
+        }
+
         settings_pages.extend(vec![
             SettingsPage::new(mcp_servers_page_handle),
             SettingsPage::new(environments_page_handle.clone()),
@@ -1457,8 +1478,22 @@ impl SettingsView {
             );
         }
 
+        if FeatureFlag::FullScreenZenMode.is_enabled() {
+            let appearance_index = nav_items
+                .iter()
+                .position(|item| matches!(item, SettingsNavItem::Page(SettingsSection::Appearance)))
+                .map_or(nav_items.len(), |index| index + 1);
+            nav_items.insert(
+                appearance_index,
+                SettingsNavItem::Page(SettingsSection::ZenMode),
+            );
+        }
+
         let initial_page = match page {
             Some(SettingsSection::Scripting) if !FeatureFlag::WarpControlCli.is_enabled() => {
+                SettingsSection::Account
+            }
+            Some(SettingsSection::ZenMode) if !FeatureFlag::FullScreenZenMode.is_enabled() => {
                 SettingsSection::Account
             }
             other => other.unwrap_or_default(),
@@ -2126,6 +2161,7 @@ impl SettingsView {
             SettingsPageViewHandle::Warpify(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Referrals(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Scripting(v) => v.as_ref(app).should_render(app),
+            SettingsPageViewHandle::ZenMode(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::WarpAgent(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::AgentProfiles(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Knowledge(v) => v.as_ref(app).should_render(app),
@@ -2839,6 +2875,15 @@ impl TypedActionView for SettingsView {
                 {
                     view.update(ctx, |view, ctx| {
                         view.handle_action(warpify_action, ctx);
+                    })
+                }
+            }
+            SettingsAction::ZenModePageToggle(zen_mode_action) => {
+                if let Some(zen_mode_page) = self.settings_page(SettingsSection::ZenMode)
+                    && let SettingsPageViewHandle::ZenMode(view) = &zen_mode_page.view_handle
+                {
+                    view.update(ctx, |view, ctx| {
+                        view.handle_action(zen_mode_action, ctx);
                     })
                 }
             }
