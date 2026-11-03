@@ -49,6 +49,17 @@ lazy_static::lazy_static! {
             ..Default::default()
         };
 
+    pub static ref PICKER_QUERY_RESULT_RENDERER_STYLES: QueryResultRendererStyles =
+        QueryResultRendererStyles {
+            use_neutral_highlights: true,
+            result_item_height_fn: |appearance| {
+                (appearance.monospace_font_size() * appearance.line_height_ratio() * 2. + 24.)
+                    .max(56. * appearance.monospace_ui_scalar())
+            },
+            result_vertical_padding: 8.,
+            result_multiline_vertical_padding: 8.,
+            ..*QUERY_RESULT_RENDERER_STYLES
+        };
 }
 
 /// Returns the `Border` for both the search results panel and details panel.

@@ -187,6 +187,11 @@ impl SearchItem for WorkflowSearchItem {
 fn breadcrumb_text_fill(highlight_state: ItemHighlightState, appearance: &Appearance) -> Fill {
     let theme = appearance.theme();
     match highlight_state {
+        ItemHighlightState::Neutral { .. } => theme.disabled_text_color(
+            highlight_state
+                .container_background_fill(appearance)
+                .unwrap_or(theme.surface_1()),
+        ),
         ItemHighlightState::Selected { .. } => {
             theme.disabled_text_color(theme.accent().with_opacity(80))
         }

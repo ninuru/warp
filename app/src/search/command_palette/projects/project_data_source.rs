@@ -76,18 +76,26 @@ pub fn rank_candidates(candidates: &[ProjectCandidate], query: &str) -> Vec<Proj
                     matched_indices: vec![],
                 })
             } else {
-                match_indices_case_insensitive(&candidate.display_path, query).map(
-                    |mut match_result| {
+                match_indices_case_insensitive(&candidate.display_path, query)
+                    .or_else(|| {
+                        match_indices_case_insensitive(&candidate.name, query).map(|name_match| {
+                            FuzzyMatchResult {
+                                score: name_match.score,
+                                matched_indices: vec![],
+                            }
+                        })
+                    })
+                    .map(|mut match_result| {
                         if candidate.is_open {
                             match_result.score *= OPEN_PROJECT_SCORE_FACTOR;
                         }
                         match_result
-                    },
-                )
+                    })
             };
             match_result.map(|match_result| ProjectSearchItem {
                 candidate: candidate.clone(),
                 match_result,
+                tooltip_state: Default::default(),
             })
         })
         .collect()
@@ -98,21 +106,15 @@ impl ProjectDataSource {
         &mut self,
         open: Vec<ProjectRef>,
         active: PathBuf,
-        open_only: bool,
         ctx: &mut ModelContext<Self>,
     ) {
         let home = dirs::home_dir().unwrap_or_default();
-        let scanned = if open_only {
-            Vec::new()
-        } else {
-            let roots = TabSettings::as_ref(ctx)
-                .project_roots
-                .iter()
-                .map(|raw| expand_root(raw, &home))
-                .collect_vec();
-            scan_roots(&roots)
-        };
-        self.candidates = merge_candidates(&open, &active, scanned, &home);
+        let roots = TabSettings::as_ref(ctx)
+            .project_roots
+            .iter()
+            .map(|raw| expand_root(raw, &home))
+            .collect_vec();
+        self.candidates = merge_candidates(&open, &active, scan_roots(&roots), &home);
     }
 }
 

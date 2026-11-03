@@ -9,5 +9,4 @@ pub enum PaletteMode {
     Files,
     Conversations,
     ProjectSessions,
-    OpenProjectSessions,
 }

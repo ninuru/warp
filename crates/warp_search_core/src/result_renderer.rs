@@ -52,6 +52,8 @@ pub struct QueryResultRendererStyles {
     pub result_outer_horizontal_padding_fn: fn(&Appearance) -> f32,
     /// Corner radius to apply to a hovered/selected row background.
     pub item_highlight_corner_radius: CornerRadius,
+    /// Uses neutral theme surfaces for result rows instead of the accent color.
+    pub use_neutral_highlights: bool,
 }
 
 impl Default for QueryResultRendererStyles {
@@ -69,6 +71,7 @@ impl Default for QueryResultRendererStyles {
             result_multiline_vertical_padding: 0.,
             result_outer_horizontal_padding_fn: |_| 0.,
             item_highlight_corner_radius: CornerRadius::with_all(Radius::Pixels(0.)),
+            use_neutral_highlights: false,
         }
     }
 }
@@ -170,6 +173,11 @@ impl<T: Action + Clone> QueryResultRenderer<T> {
         is_static_separator: bool,
         app: &AppContext,
     ) -> Box<dyn Element> {
+        let highlight_state = if self.renderer_styles.use_neutral_highlights {
+            highlight_state.with_neutral_surface()
+        } else {
+            highlight_state
+        };
         let appearance = Appearance::as_ref(app);
         let icon = self.search_result.render_icon(highlight_state, appearance);
         let item = self.search_result.render_item(highlight_state, app);
@@ -269,8 +277,7 @@ impl<T: Action + Clone> QueryResultRenderer<T> {
     }
 }
 
-/// Represents the UI state of a search result in the panel.  If a result is selected via
-/// navigation keys _and_ hovered by the mouse, its state should be `Selected`.
+/// Represents the UI state of a search result. Keyboard selection takes precedence over hover.
 #[derive(Copy, Clone, Debug)]
 pub enum ItemHighlightState {
     /// A selected item can still be hovered, so we want to keep track of that within the selected state.
@@ -279,6 +286,11 @@ pub enum ItemHighlightState {
     },
     Hovered,
     Default,
+    /// Result state with foreground colors derived from its neutral background.
+    Neutral {
+        is_selected: bool,
+        is_hovered: bool,
+    },
 }
 
 impl ItemHighlightState {
@@ -294,11 +306,32 @@ impl ItemHighlightState {
         }
     }
 
+    pub fn with_neutral_surface(self) -> Self {
+        Self::Neutral {
+            is_selected: self.is_selected(),
+            is_hovered: self.is_hovered(),
+        }
+    }
+
+    fn neutral_background(&self, appearance: &Appearance) -> Fill {
+        let theme = appearance.theme();
+        if self.is_selected() {
+            theme.surface_3()
+        } else if self.is_hovered() {
+            theme.surface_2()
+        } else {
+            theme.surface_1()
+        }
+    }
+
     /// Returns the fill to be used for the search result icon.
     pub fn icon_fill(&self, appearance: &Appearance) -> Fill {
         let theme = appearance.theme();
         match self {
             ItemHighlightState::Selected { .. } => theme.main_text_color(theme.accent()),
+            ItemHighlightState::Neutral { .. } => {
+                theme.main_text_color(self.neutral_background(appearance))
+            }
             ItemHighlightState::Hovered | ItemHighlightState::Default => {
                 theme.main_text_color(theme.surface_2()).with_opacity(80)
             }
@@ -309,6 +342,9 @@ impl ItemHighlightState {
     pub fn main_text_fill(&self, appearance: &Appearance) -> Fill {
         let theme = appearance.theme();
         match self {
+            ItemHighlightState::Neutral { .. } => {
+                theme.main_text_color(self.neutral_background(appearance))
+            }
             ItemHighlightState::Selected { .. } => {
                 theme.main_text_color(theme.accent().with_opacity(80))
             }
@@ -322,6 +358,9 @@ impl ItemHighlightState {
     pub fn sub_text_fill(&self, appearance: &Appearance) -> Fill {
         let theme = appearance.theme();
         match self {
+            ItemHighlightState::Neutral { .. } => {
+                theme.sub_text_color(self.neutral_background(appearance))
+            }
             ItemHighlightState::Selected { .. } => {
                 theme.sub_text_color(theme.accent().with_opacity(80))
             }
@@ -334,6 +373,7 @@ impl ItemHighlightState {
     /// Returns the fill to be used as the background of the search result.
     pub fn container_background_fill(&self, appearance: &Appearance) -> Option<Fill> {
         match self {
+            ItemHighlightState::Neutral { .. } => Some(self.neutral_background(appearance)),
             ItemHighlightState::Selected { .. } | ItemHighlightState::Hovered => Some(
                 appearance
                     .theme()
@@ -349,18 +389,31 @@ impl ItemHighlightState {
             ItemHighlightState::Selected { .. } => 90,
             ItemHighlightState::Hovered => 20,
             ItemHighlightState::Default => 0,
+            ItemHighlightState::Neutral { .. } => 100,
         }
     }
 
     pub fn is_hovered(&self) -> bool {
         match self {
-            ItemHighlightState::Selected { is_hovered, .. } => *is_hovered,
+            ItemHighlightState::Selected { is_hovered, .. }
+            | ItemHighlightState::Neutral { is_hovered, .. } => *is_hovered,
             ItemHighlightState::Hovered => true,
             ItemHighlightState::Default => false,
         }
     }
 
     pub fn is_selected(&self) -> bool {
-        matches!(self, ItemHighlightState::Selected { .. })
+        matches!(
+            self,
+            ItemHighlightState::Selected { .. }
+                | ItemHighlightState::Neutral {
+                    is_selected: true,
+                    ..
+                }
+        )
     }
 }
+
+#[cfg(test)]
+#[path = "result_renderer_tests.rs"]
+mod tests;

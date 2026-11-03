@@ -1,9 +1,15 @@
+use std::time::Duration;
+
 use warpui::elements::{
-    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Flex, Hoverable,
-    MainAxisSize, ParentElement, Radius, Text,
+    ChildAnchor, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Flex,
+    Hoverable, MainAxisSize, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds,
+    Radius, SavePosition, Stack, Text,
 };
 use warpui::fonts::{Properties, Weight};
+use warpui::geometry::vector::vec2f;
 use warpui::platform::Cursor;
+use warpui::text_layout::ClipConfig;
+use warpui::ui_components::components::UiComponent;
 use warpui::{AppContext, Element, SingletonEntity, ViewContext, ViewHandle};
 
 use super::Workspace;
@@ -16,6 +22,9 @@ use crate::session_management::RunningSessionSummary;
 use crate::workspace::WorkspaceAction;
 
 const CHIP_FONT_SIZE: f32 = 12.;
+const PROJECT_NAME_MAX_WIDTH: f32 = 180.;
+const TOOLTIP_MAX_WIDTH: f32 = 360.;
+const TOOLTIP_DELAY: Duration = Duration::from_millis(400);
 const RENAME_EDITOR_MAX_WIDTH: f32 = 150.;
 const RUNNING_DOT_SIZE: f32 = 6.;
 const STATUS_MARGIN: f32 = 4.;
@@ -171,14 +180,45 @@ impl Workspace {
         let mouse_state = self.mouse_states.project_chip.clone();
         let label = self.project_chip_label(appearance);
         let hoverable = Hoverable::new(mouse_state, move |hover_state| {
-            self.project_chip_container(label, hover_state.is_hovered(), appearance)
+            let chip = self.project_chip_container(
+                label,
+                hover_state.is_mouse_over_element(),
+                appearance,
+            );
+            if !hover_state.is_hovered() {
+                return chip;
+            }
+            let (running, finished) = self.background_project_status();
+            let tooltip_text = format!(
+                "{}\n{}\n\nOther open projects: {}\nRunning: {running}; finished unseen: {finished}\n\nOpen project picker",
+                self.active_project.name,
+                self.active_project.root.display(),
+                self.hidden_projects.len(),
+            );
+            let tooltip = ConstrainedBox::new(
+                appearance.ui_builder().tool_tip(tooltip_text).build().finish(),
+            )
+            .with_max_width(TOOLTIP_MAX_WIDTH)
+            .finish();
+            let mut stack = Stack::new().with_child(chip);
+            stack.add_positioned_overlay_child(
+                tooltip,
+                OffsetPositioning::offset_from_parent(
+                    vec2f(0., 4.),
+                    ParentOffsetBounds::WindowByPosition,
+                    ParentAnchor::BottomLeft,
+                    ChildAnchor::TopLeft,
+                ),
+            );
+            stack.finish()
         })
+        .with_hover_in_delay(TOOLTIP_DELAY)
         .with_cursor(Cursor::PointingHand)
         .on_click(|ctx, _, _| {
             ctx.dispatch_typed_action(WorkspaceAction::OpenProjectPicker);
         })
         .finish();
-        Some(hoverable)
+        Some(SavePosition::new(hoverable, "workspace:project_chip").finish())
     }
 
     fn project_chip_label(&self, appearance: &Appearance) -> Box<dyn Element> {
@@ -188,13 +228,18 @@ impl Workspace {
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_main_axis_size(MainAxisSize::Min);
         row.add_child(
-            Text::new_inline(
-                self.active_project.name.clone(),
-                font_family,
-                CHIP_FONT_SIZE,
+            ConstrainedBox::new(
+                Text::new_inline(
+                    self.active_project.name.clone(),
+                    font_family,
+                    CHIP_FONT_SIZE,
+                )
+                .with_color(theme.active_ui_text_color().into_solid())
+                .with_style(Properties::default().weight(Weight::Semibold))
+                .with_clip(ClipConfig::ellipsis())
+                .finish(),
             )
-            .with_color(theme.active_ui_text_color().into_solid())
-            .with_style(Properties::default().weight(Weight::Semibold))
+            .with_max_width(PROJECT_NAME_MAX_WIDTH)
             .finish(),
         );
         let hidden_count = self.hidden_projects.len();

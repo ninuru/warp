@@ -95,9 +95,9 @@ pub(crate) fn project_bindings() -> [EditableBinding; 4] {
         .with_enabled(|| FeatureFlag::ProjectSessions.is_enabled()),
         EditableBinding::new(
             "workspace:list_open_projects",
-            "List open projects",
+            "List open sessions",
             WorkspaceAction::OpenPalette {
-                mode: PaletteMode::OpenProjectSessions,
+                mode: PaletteMode::Navigation,
                 source: PaletteSource::Keybinding,
                 query: None,
             },

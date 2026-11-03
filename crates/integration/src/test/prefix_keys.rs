@@ -1,12 +1,15 @@
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
+use warp::appearance::AppearanceManager;
 use warp::features::FeatureFlag;
 use warp::integration_testing::pane_group::assert_num_panes_in_tab;
 use warp::integration_testing::step::new_step_with_default_assertions;
 use warp::integration_testing::terminal::{
     assert_alt_grid_active, assert_input_editor_contents, assert_no_block_executing,
-    execute_command_successfully, execute_long_running_command,
+    execute_command_successfully, execute_long_running_command, wait_until_bootstrapped_pane,
     wait_until_bootstrapped_single_pane_for_tab,
 };
 use warp::integration_testing::view_getters::{
@@ -14,11 +17,14 @@ use warp::integration_testing::view_getters::{
 };
 use warp::integration_testing::workspace::{assert_focused_tab_index, assert_tab_count};
 use warp::search::command_palette::mixer::CommandPaletteItemAction;
-use warp::workspace::WorkspaceAction;
+use warp::themes::theme::{CustomTheme, ThemeKind};
+use warp::workspace::{PaneViewLocator, WorkspaceAction};
 use warpui_core::event::KeyEventDetails;
+use warpui_core::geometry::rect::RectF;
+use warpui_core::geometry::vector::vec2f;
 use warpui_core::integration::{AssertionCallback, AssertionOutcome, TestStep};
 use warpui_core::keymap::Keystroke;
-use warpui_core::{App, Event, WindowId, async_assert};
+use warpui_core::{App, Event, SingletonEntity, WindowId, async_assert};
 
 use super::new_builder;
 use crate::Builder;
@@ -492,87 +498,319 @@ fn project_picker_paths(app: &App, window_id: WindowId) -> Vec<PathBuf> {
     })
 }
 
-pub fn test_prefix_lists_only_open_projects() -> Builder {
+fn switch_project(name: &'static str) -> TestStep {
+    new_step_with_default_assertions(&format!("open project {name}")).with_action(
+        move |app, window_id, _| {
+            let workspace = workspace_view(app, window_id);
+            app.update(|ctx| {
+                ctx.dispatch_typed_action_for_view(
+                    window_id,
+                    workspace.id(),
+                    &WorkspaceAction::SwitchProject {
+                        path: PathBuf::from(std::env::var_os("HOME").expect("test home"))
+                            .join("projects")
+                            .join(name),
+                    },
+                )
+            });
+        },
+    )
+}
+
+fn selected_session(app: &App, window_id: WindowId) -> Option<PaneViewLocator> {
+    command_palette_view(app, window_id).read(app, |palette, ctx| {
+        match palette.selected_search_result(ctx)?.accept_result() {
+            CommandPaletteItemAction::NavigateToSession {
+                pane_view_locator, ..
+            } => Some(pane_view_locator),
+            _ => None,
+        }
+    })
+}
+
+pub fn test_prefix_session_and_project_pickers() -> Builder {
     FeatureFlag::ProjectSessions.set_enabled(true);
+    let target = Rc::new(Cell::new(None));
+    let remember_target = target.clone();
+    let refreshed_target = target.clone();
+    let activated_target = target.clone();
     prefix_builder()
         // The harness only isolates HOME on Unix.
         .set_should_run_test(|| cfg!(unix))
         .with_setup(|utils| {
-            for name in ["Nominet", "DNSBelgium", "Unopened"] {
+            for name in [
+                "Nominet",
+                "DNSBelgium",
+                "Unopened",
+                "api",
+                "開発 — very-long-international-project-name-for-path-truncation",
+            ] {
                 std::fs::create_dir_all(utils.test_dir().join("projects").join(name))
                     .expect("create project fixture");
             }
+            std::fs::create_dir_all(utils.test_dir().join("IdeaProjects/api"))
+                .expect("create duplicate project fixture");
         })
         .with_step(
-            new_step_with_default_assertions("open two project sessions").with_action(
+            TestStep::new("apply optional visual verification theme").with_action(
                 |app, window_id, _| {
-                    let workspace = workspace_view(app, window_id);
-                    for name in ["Nominet", "DNSBelgium"] {
+                    if std::env::var_os("WARP_PICKER_NARROW").is_some() {
+                        let workspace = workspace_view(app, window_id);
                         app.update(|ctx| {
-                            ctx.dispatch_typed_action_for_view(
+                            for _ in 0..3 {
+                                ctx.dispatch_typed_action_for_view(
+                                    window_id,
+                                    workspace.id(),
+                                    &WorkspaceAction::IncreaseFontSize,
+                                );
+                            }
+                            ctx.windows().set_window_bounds(
                                 window_id,
-                                workspace.id(),
-                                &WorkspaceAction::SwitchProject {
-                                    path: PathBuf::from(
-                                        std::env::var_os("HOME").expect("test home"),
-                                    )
-                                    .join("projects")
-                                    .join(name),
-                                },
+                                RectF::new(vec2f(0., 0.), vec2f(520., 760.)),
                             );
+                        });
+                    }
+                    if let Some(path) = std::env::var_os("WARP_PICKER_THEME_PATH") {
+                        app.update(|ctx| {
+                            AppearanceManager::handle(ctx).update(ctx, |appearance, ctx| {
+                                appearance.set_transient_theme(
+                                    ThemeKind::Custom(CustomTheme::new(
+                                        "Picker verification".into(),
+                                        PathBuf::from(path),
+                                    )),
+                                    ctx,
+                                );
+                            })
                         });
                     }
                 },
             ),
         )
+        .with_step(switch_project("Nominet"))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
         .with_step(
-            TestStep::new("ctrl-a s lists only other open sessions")
-                .set_timeout(Duration::from_secs(15))
+            new_step_with_default_assertions("split the first project session")
+                .with_event(ctrl_a())
+                .with_keystrokes(&["%"])
+                .add_assertion(assert_num_panes_in_tab(0, 2)),
+        )
+        .with_step(wait_until_bootstrapped_pane(0, 1))
+        .with_step(switch_project("DNSBelgium"))
+        .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
+        .with_step(
+            TestStep::new("ctrl-a s lists individual sessions across projects")
                 .with_event(ctrl_a())
                 .with_keystrokes(&["s"])
                 .add_assertion(|app, window_id| {
-                    let home = PathBuf::from(std::env::var_os("HOME").expect("test home"));
-                    let paths = project_picker_paths(app, window_id);
-                    async_assert!(
-                        paths == vec![home.join("projects/Nominet"), home],
-                        "Expected only open sessions, got {paths:?}"
-                    )
+                    command_palette_view(app, window_id).read(app, |palette, ctx| {
+                        let actions: Vec<_> = palette
+                            .search_results(ctx)
+                            .map(|result| result.accept_result())
+                            .collect();
+                        async_assert!(
+                            actions.len() == 4
+                                && actions.iter().all(|action| matches!(
+                                    action,
+                                    CommandPaletteItemAction::NavigateToSession { .. }
+                                )),
+                            "Expected four terminal sessions, got {actions:?}"
+                        )
+                    })
                 })
                 .set_post_step_pause(CHIP_RENDER_PAUSE)
-                .with_take_screenshot("open-project-sessions.png"),
+                .with_take_screenshot("sessions-picker.png"),
         )
         .with_step(
-            TestStep::new("ctrl-a f still discovers unopened projects")
+            TestStep::new("filter to the hidden project's split sessions")
+                .with_typed_characters(&["Nominet"])
+                .add_assertion(|app, window_id| {
+                    command_palette_view(app, window_id).read(app, |palette, ctx| {
+                        async_assert!(
+                            palette.search_results(ctx).count() == 2,
+                            "Expected both hidden split sessions"
+                        )
+                    })
+                }),
+        )
+        .with_step(TestStep::new("choose the second session").with_keystrokes(&["down"]))
+        .with_step(
+            TestStep::new("refresh preserves the selected session")
+                .with_action(move |app, window_id, _| {
+                    remember_target.set(selected_session(app, window_id));
+                    command_palette_view(app, window_id).update(app, |palette, ctx| {
+                        palette
+                            .search_bar
+                            .update(ctx, |bar, ctx| bar.run_query(ctx));
+                    });
+                })
+                .add_assertion(move |app, window_id| {
+                    async_assert!(
+                        selected_session(app, window_id) == refreshed_target.get(),
+                        "Refresh changed the selected session"
+                    )
+                }),
+        )
+        .with_step(
+            TestStep::new("enter reveals the hidden project and exact split pane")
+                .with_keystrokes(&["enter"])
+                .add_assertion(move |app, window_id| {
+                    workspace_view(app, window_id).read(app, |workspace, ctx| {
+                        let group = workspace.active_tab_pane_group();
+                        let actual = PaneViewLocator {
+                            pane_group_id: group.id(),
+                            pane_id: group.as_ref(ctx).focused_pane_id(ctx),
+                        };
+                        async_assert!(
+                            Some(actual) == activated_target.get(),
+                            "Did not focus the selected hidden pane"
+                        )
+                    })
+                }),
+        )
+        .with_step(
+            TestStep::new("unmatched query has no selectable session")
+                .with_event(ctrl_a())
+                .with_keystrokes(&["s"])
+                .with_typed_characters(&["no-such-session-9384"])
+                .add_assertion(|app, window_id| {
+                    command_palette_view(app, window_id).read(app, |palette, ctx| {
+                        async_assert!(
+                            palette.search_results(ctx).next().is_none()
+                                && palette.selected_search_result(ctx).is_none(),
+                            "Empty state selected an action"
+                        )
+                    })
+                })
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("sessions-empty.png"),
+        )
+        .with_step(
+            TestStep::new("enter on empty results keeps the picker open")
+                .with_keystrokes(&["enter"])
+                .add_assertion(|app, window_id| {
+                    workspace_view(app, window_id).read(app, |workspace, _| {
+                        async_assert!(
+                            workspace.is_palette_open(),
+                            "Empty results activated an action"
+                        )
+                    })
+                }),
+        )
+        .with_step(
+            TestStep::new("escape restores terminal input focus")
                 .with_keystrokes(&["escape"])
+                .with_typed_characters(&["picker-focus-restored"])
+                .add_assertion(|app, window_id| {
+                    workspace_view(app, window_id).read(app, |workspace, ctx| {
+                        let terminal = workspace
+                            .active_tab_pane_group()
+                            .as_ref(ctx)
+                            .focused_session_view(ctx)
+                            .expect("focused terminal");
+                        let contents = terminal.as_ref(ctx).input().as_ref(ctx).buffer_text(ctx);
+                        async_assert!(
+                            contents == "picker-focus-restored",
+                            "Escape did not restore input focus: {contents:?}"
+                        )
+                    })
+                }),
+        )
+        .with_step(TestStep::new("clear focus probe").with_keystrokes(&["ctrl-u"]))
+        .with_step(
+            TestStep::new("ctrl-a f discovers projects separately")
                 .with_event(ctrl_a())
                 .with_keystrokes(&["f"])
                 .add_assertion(|app, window_id| {
                     let unopened = PathBuf::from(std::env::var_os("HOME").expect("test home"))
                         .join("projects/Unopened");
-                    let paths = project_picker_paths(app, window_id);
                     async_assert!(
-                        paths.contains(&unopened),
-                        "Discovery should include {unopened:?}, got {paths:?}"
+                        project_picker_paths(app, window_id).contains(&unopened),
+                        "Project discovery omitted unopened folders"
                     )
-                }),
+                })
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("projects-picker.png"),
         )
         .with_step(
-            TestStep::new("ctrl-a s resets discovery and switches to an open session")
-                .with_keystrokes(&["escape"])
-                .with_event(ctrl_a())
-                .with_keystrokes(&["s"])
+            TestStep::new("duplicate basenames retain distinct paths")
+                .with_typed_characters(&["api"])
                 .add_assertion(|app, window_id| {
                     let home = PathBuf::from(std::env::var_os("HOME").expect("test home"));
                     let paths = project_picker_paths(app, window_id);
                     async_assert!(
-                        paths == vec![home.join("projects/Nominet"), home],
-                        "Expected only open sessions, got {paths:?}"
+                        paths.contains(&home.join("projects/api"))
+                            && paths.contains(&home.join("IdeaProjects/api")),
+                        "Duplicate basenames lost their identity: {paths:?}"
+                    )
+                })
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("projects-duplicates.png"),
+        )
+        .with_step(
+            TestStep::new("long Unicode project is searchable")
+                .with_keystrokes(&["ctrl-u"])
+                .with_typed_characters(&["開発"])
+                .add_assertion(|app, window_id| {
+                    async_assert!(
+                        project_picker_paths(app, window_id).len() == 1,
+                        "Unicode project did not match"
+                    )
+                })
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("project-long-path.png"),
+        )
+        .with_step(
+            TestStep::new("project empty state keeps query focus")
+                .with_keystrokes(&["ctrl-u"])
+                .with_typed_characters(&["no-such-project-9384"])
+                .add_assertion(|app, window_id| {
+                    command_palette_view(app, window_id).read(app, |palette, ctx| {
+                        async_assert!(
+                            palette.search_results(ctx).next().is_none(),
+                            "Expected empty project results"
+                        )
+                    })
+                })
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("projects-empty.png"),
+        )
+        .with_step(TestStep::new("close project picker").with_keystrokes(&["escape"]))
+        .with_step(
+            TestStep::new("rename project with a long Unicode name")
+                .with_event(ctrl_a())
+                .with_keystrokes(&["$", "ctrl-u"])
+                .with_typed_characters(&[
+                    "開発 — International Customer Portal with a long project name",
+                ])
+                .with_keystrokes(&["enter"]),
+        )
+        .with_step(
+            TestStep::new("project chip retains status and exposes full details")
+                .with_hover_over_saved_position("workspace:project_chip")
+                .set_post_step_pause(Duration::from_millis(600))
+                .with_take_screenshot("project-chip-details.png"),
+        )
+        .with_step(
+            TestStep::new("prefix entry point remains responsive")
+                .with_event(ctrl_a())
+                .set_post_step_pause(CHIP_RENDER_PAUSE)
+                .with_take_screenshot("prefix-entry.png"),
+        )
+        .with_step(TestStep::new("cancel prefix").with_keystrokes(&["escape"]))
+        .with_step(switch_project("DNSBelgium"))
+        .with_step(
+            TestStep::new("renamed project matches its visible name")
+                .with_event(ctrl_a())
+                .with_keystrokes(&["f"])
+                .with_typed_characters(&["Customer Portal"])
+                .add_assertion(|app, window_id| {
+                    let root = PathBuf::from(std::env::var_os("HOME").expect("test home"))
+                        .join("projects/Nominet");
+                    async_assert!(
+                        project_picker_paths(app, window_id) == vec![root],
+                        "Renamed project did not match its visible name"
                     )
                 }),
         )
-        .with_step(TestStep::new("select the open project").with_keystrokes(&["enter"]))
-        .with_step(execute_command_successfully(
-            r#"test "$PWD" = "$HOME/projects/Nominet""#,
-        ))
+        .with_step(TestStep::new("close renamed project results").with_keystrokes(&["escape"]))
 }

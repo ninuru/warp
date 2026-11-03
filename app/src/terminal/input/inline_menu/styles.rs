@@ -41,6 +41,7 @@ pub fn item_background(
         ItemHighlightState::Selected { .. } => Some(theme.surface_overlay_2()),
         ItemHighlightState::Hovered => Some(theme.surface_overlay_1()),
         ItemHighlightState::Default => None,
+        ItemHighlightState::Neutral { .. } => highlight_state.container_background_fill(appearance),
     }
 }
 
