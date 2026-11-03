@@ -1534,7 +1534,7 @@ impl From<SingleLineEditorOptions> for EditorOptions {
             autocomplete_symbols: options.autocomplete_symbols,
             soft_wrap: options.soft_wrap,
             placeholder_soft_wrap: options.placeholder_soft_wrap,
-            supports_vim_mode: false,
+            supports_vim_mode: options.supports_vim_mode,
             render_decorator_elements: None,
             select_all_on_focus: options.select_all_on_focus,
             clear_selections_on_blur: options.clear_selections_on_blur,
@@ -1581,6 +1581,7 @@ pub struct SingleLineEditorOptions {
     pub allow_user_cursor_preference: bool,
     pub convert_newline_to_space: bool,
     pub is_password: bool,
+    pub supports_vim_mode: bool,
 }
 
 impl Default for SingleLineEditorOptions {
@@ -1604,6 +1605,7 @@ impl Default for SingleLineEditorOptions {
             allow_user_cursor_preference: false,
             convert_newline_to_space: true,
             is_password: false,
+            supports_vim_mode: false,
         }
     }
 }
@@ -5481,7 +5483,7 @@ impl EditorView {
     }
 
     /// Clears the VimFSA's pending command state and enters insert mode.
-    fn vim_force_insert_mode(&mut self, ctx: &mut ViewContext<Self>) {
+    pub fn vim_force_insert_mode(&mut self, ctx: &mut ViewContext<Self>) {
         self.vim_model.update(ctx, |vim, ctx| {
             vim.force_insert_mode(ctx);
         });
