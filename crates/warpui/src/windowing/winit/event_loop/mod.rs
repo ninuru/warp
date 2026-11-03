@@ -167,6 +167,7 @@ struct WindowState {
     /// UI element only requests the keyboard during LeftMouseDown.
     #[cfg(target_family = "wasm")]
     pending_soft_keyboard_request: bool,
+    is_fullscreen: bool,
 }
 
 impl WindowState {
@@ -186,6 +187,7 @@ impl WindowState {
             momentum_scroll_abort: None,
             #[cfg(target_family = "wasm")]
             pending_soft_keyboard_request: false,
+            is_fullscreen: false,
         }
     }
 
@@ -511,6 +513,8 @@ pub(super) struct EventLoop {
     /// Soft keyboard manager for mobile WASM.
     #[cfg(target_family = "wasm")]
     soft_keyboard_manager: Option<std::rc::Rc<crate::platform::wasm::SoftKeyboardManager>>,
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    x11_fullscreen_tracker: Option<super::window::x11_fullscreen::X11FullscreenTracker>,
 }
 
 impl EventLoop {
@@ -533,6 +537,8 @@ impl EventLoop {
             downrank_non_nvidia_vulkan_adapters: false,
             #[cfg(target_family = "wasm")]
             soft_keyboard_manager: None,
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            x11_fullscreen_tracker: None,
         }
     }
 
@@ -551,6 +557,16 @@ impl EventLoop {
                             crate::windowing::WindowingSystem::Wayland
                         };
                     log::info!("Running app with windowing system: {windowing_system:?}");
+                    if windowing_system == crate::windowing::WindowingSystem::X11 {
+                        match super::window::x11_fullscreen::X11FullscreenTracker::new(
+                            self.proxy.clone(),
+                        ) {
+                            Ok(tracker) => self.x11_fullscreen_tracker = Some(tracker),
+                            Err(err) => {
+                                log::warn!("Failed to start X11 fullscreen tracking: {err:#}")
+                            }
+                        }
+                    }
                     if let Err(err) = super::app::WINDOWING_SYSTEM.set(windowing_system) {
                         log::warn!("Could not set global static for windowing system: {err:?}");
                     }
@@ -617,6 +633,10 @@ impl EventLoop {
                     self.downrank_non_nvidia_vulkan_adapters,
                 ) {
                     Ok(winit_window_id) => {
+                        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                        if let Some(tracker) = &self.x11_fullscreen_tracker {
+                            window.track_x11_fullscreen(tracker.clone());
+                        }
                         let window_state = WindowState::new(window_id);
                         self.state.windows.insert(winit_window_id, window_state);
                         // Now that the window has opened and we know its
@@ -746,6 +766,12 @@ impl EventLoop {
                     let winit_window = downcast_window(window.as_ref());
                     winit_window.set_cursor_icon(cursor);
                 });
+            }
+            Event::UserEvent(CustomEvent::WindowFullscreenStateChanged) => {
+                let winit_window_ids = self.state.windows.keys().copied().collect::<Vec<_>>();
+                for winit_window_id in winit_window_ids {
+                    self.sync_fullscreen_state(winit_window_id);
+                }
             }
             Event::UserEvent(CustomEvent::ActiveCursorPositionUpdated) => {
                 if self.ime_enabled {
@@ -960,11 +986,34 @@ impl EventLoop {
         }
     }
 
+    fn sync_fullscreen_state(&mut self, winit_window_id: WinitWindowId) {
+        let Some(window_state) = self.state.windows.get_mut(&winit_window_id) else {
+            return;
+        };
+        let Some(window) = self
+            .ui_app
+            .read(|ctx| ctx.windows().platform_window(window_state.window_id))
+        else {
+            return;
+        };
+        let is_fullscreen = downcast_window(window.as_ref()).is_fullscreen();
+        if std::mem::replace(&mut window_state.is_fullscreen, is_fullscreen) == is_fullscreen {
+            return;
+        }
+        self.ui_app.update(|ctx| {
+            use crate::SingletonEntity as _;
+            crate::windowing::WindowManager::handle(ctx).update(ctx, |window_manager, ctx| {
+                window_manager.update_is_active_window_fullscreen(ctx);
+            });
+        });
+    }
+
     fn redraw_window(
         &mut self,
         window_id: winit::window::WindowId,
         window_target: &ActiveEventLoop,
     ) {
+        self.sync_fullscreen_state(window_id);
         let Some(window_id) = self
             .state
             .windows

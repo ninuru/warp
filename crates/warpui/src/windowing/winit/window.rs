@@ -1,5 +1,7 @@
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 mod x11;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub(super) mod x11_fullscreen;
 
 #[cfg(windows)]
 mod windows_wm;
@@ -713,6 +715,8 @@ pub(super) struct Window {
     /// maximize/restore when double-clicked.
     titlebar_height: Cell<f32>,
     capture_callback: RefCell<Option<FrameCaptureCallback>>,
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    x11_fullscreen: RefCell<Option<(x11_fullscreen::X11FullscreenTracker, u32)>>,
 }
 
 impl Window {
@@ -723,7 +727,42 @@ impl Window {
             scene: Default::default(),
             titlebar_height: Cell::new(DEFAULT_TITLEBAR_HEIGHT),
             capture_callback: RefCell::new(None),
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            x11_fullscreen: RefCell::new(None),
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    pub fn track_x11_fullscreen(&self, tracker: x11_fullscreen::X11FullscreenTracker) {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        let x11_window = self.inner.borrow().as_ref().and_then(|inner| {
+            match inner.window.window_handle().ok()?.as_raw() {
+                RawWindowHandle::Xlib(handle) => u32::try_from(handle.window).ok(),
+                RawWindowHandle::Xcb(handle) => Some(handle.window.get()),
+                _ => None,
+            }
+        });
+        let Some(x11_window) = x11_window else {
+            return;
+        };
+        match tracker.track(x11_window) {
+            Ok(()) => {
+                self.x11_fullscreen.replace(Some((tracker, x11_window)));
+            }
+            Err(err) => log::warn!("Failed to track X11 fullscreen state: {err:#}"),
+        }
+    }
+
+    pub fn is_fullscreen(&self) -> bool {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if let Some((tracker, x11_window)) = self.x11_fullscreen.borrow().as_ref() {
+            return tracker.is_fullscreen(*x11_window);
+        }
+        self.inner
+            .borrow()
+            .as_ref()
+            .is_some_and(|Inner { window, .. }| window.fullscreen().is_some())
     }
 
     pub fn titlebar_height(&self) -> f32 {
@@ -1576,14 +1615,14 @@ impl crate::platform::Window for Window {
     }
 
     fn fullscreen_state(&self) -> FullscreenState {
+        if self.is_fullscreen() {
+            return FullscreenState::Fullscreen;
+        }
         self.inner
             .borrow()
             .as_ref()
             .and_then(|Inner { window, .. }| {
-                window
-                    .fullscreen()
-                    .map(|_| FullscreenState::Fullscreen)
-                    .or(window.is_maximized().then_some(FullscreenState::Maximized))
+                window.is_maximized().then_some(FullscreenState::Maximized)
             })
             .unwrap_or_default()
     }
