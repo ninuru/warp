@@ -60,6 +60,8 @@ pub enum CustomEvent {
     SetCursorShape(platform::Cursor),
     ActiveCursorPositionUpdated,
     #[cfg_attr(not(any(target_os = "linux", target_os = "freebsd")), allow(dead_code))]
+    WindowFullscreenStateChanged,
+    #[cfg_attr(not(any(target_os = "linux", target_os = "freebsd")), allow(dead_code))]
     AboutToSleep,
     #[cfg_attr(not(any(target_os = "linux", target_os = "freebsd")), allow(dead_code))]
     ResumedFromSleep,

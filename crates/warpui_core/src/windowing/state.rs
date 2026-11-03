@@ -276,7 +276,7 @@ impl WindowManager {
     }
 
     /// Updates saved state corresponding to whether the active window is fullscreen.
-    pub(crate) fn update_is_active_window_fullscreen(&mut self, ctx: &mut ModelContext<Self>) {
+    pub fn update_is_active_window_fullscreen(&mut self, ctx: &mut ModelContext<Self>) {
         let is_active_window_fullscreen = self.state.active_window.map(|id| {
             self.platform_window(id)
                 .map(|window| window.fullscreen_state() == FullscreenState::Fullscreen)
