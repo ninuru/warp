@@ -1062,6 +1062,7 @@ pub struct Workspace {
     pub(crate) hovered_tab_index: Option<TabBarHoverIndex>,
     tab_bar_hover_state: MouseStateHandle,
     zen_mode: ZenModeState,
+    zen_mode_pane_group: Option<WeakViewHandle<PaneGroup>>,
     tab_fixed_width: Option<f32>,
     traffic_light_mouse_states: TrafficLightMouseStates,
     /// Tab groups in this workspace, keyed by id.
@@ -3471,6 +3472,7 @@ impl Workspace {
             hovered_tab_index: None,
             tab_bar_hover_state: Default::default(),
             zen_mode: ZenModeState::default(),
+            zen_mode_pane_group: None,
             traffic_light_mouse_states: Default::default(),
             tab_groups: HashMap::new(),
             active_project: ProjectRef::home(),
@@ -14722,6 +14724,7 @@ impl Workspace {
                 request_fullscreen,
                 close_panels,
             } => {
+                self.zen_mode_pane_group = Some(self.active_tab_pane_group().downgrade());
                 self.set_zen_panels_open(close_panels, false, ctx);
                 request_fullscreen
             }
@@ -14748,6 +14751,14 @@ impl Workspace {
             self.toggle_vertical_tabs_panel(ctx);
         }
         let pane_group = self.active_tab_pane_group().clone();
+        if open
+            && self
+                .zen_mode_pane_group
+                .take()
+                .is_none_or(|zen_pane_group| zen_pane_group.id() != pane_group.id())
+        {
+            return;
+        }
         if panels.left && pane_group.as_ref(ctx).left_panel_open != open {
             self.toggle_left_panel(ctx);
         }
