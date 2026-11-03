@@ -359,6 +359,7 @@ impl<T: Action + Clone> SearchBar<T> {
             let options = SingleLineEditorOptions {
                 propagate_and_no_op_vertical_navigation_keys:
                     PropagateAndNoOpNavigationKeys::Always,
+                supports_vim_mode: true,
                 ..Default::default()
             };
             EditorView::single_line(options, ctx)
@@ -544,6 +545,7 @@ impl<T: Action + Clone> SearchBar<T> {
         self.editor_handle
             .update(ctx, |editor: &mut EditorView, ctx| {
                 editor.clear_buffer_and_reset_undo_stack(ctx);
+                editor.vim_force_insert_mode(ctx);
                 if let Some(initial_query) = initial_query {
                     editor.user_initiated_insert(
                         initial_query.as_str(),

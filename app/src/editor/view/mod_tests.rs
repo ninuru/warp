@@ -4686,3 +4686,58 @@ mod vim_handler_tests;
 
 #[path = "marked_text_tests.rs"]
 mod marked_text_tests;
+
+/// A single-line editor that propagates vertical navigation, like the command palette's search
+/// bar, should let Vim Normal mode `j`/`k` walk the parent's results and should only report
+/// `escape` once Vim is back in Normal mode.
+#[test]
+fn test_single_line_vim_normal_mode_j_and_k_propagate_navigation() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+
+        let (_, editor) = app.add_window(WindowStyle::NotStealFocus, |ctx| {
+            let options = SingleLineEditorOptions {
+                propagate_and_no_op_vertical_navigation_keys:
+                    PropagateAndNoOpNavigationKeys::Always,
+                supports_vim_mode: true,
+                ..Default::default()
+            };
+            EditorView::single_line(options, ctx)
+        });
+        let events = Rc::new(RefCell::new(Vec::new()));
+        app.update(|ctx| {
+            let events = events.clone();
+            ctx.subscribe_to_view(&editor, move |_, event, _| {
+                events.borrow_mut().push(format!("{event:?}"));
+            });
+        });
+
+        editor.update(&mut app, |view, ctx| {
+            view.vim_user_insert("abc", ctx);
+            assert_eq!(view.vim_mode(ctx), Some(VimMode::Insert));
+        });
+        editor.update(&mut app, |view, ctx| {
+            view.handle_action(&EditorAction::Escape, ctx);
+            assert_eq!(view.vim_mode(ctx), Some(VimMode::Normal));
+        });
+        editor.update(&mut app, |view, ctx| view.vim_user_insert("j", ctx));
+        editor.update(&mut app, |view, ctx| view.vim_user_insert("k", ctx));
+        editor.update(&mut app, |view, ctx| {
+            view.handle_action(&EditorAction::Escape, ctx);
+        });
+
+        let navigation_and_escape_events = events
+            .borrow()
+            .iter()
+            .filter(|event| event.starts_with("Navigate") || event.as_str() == "Escape")
+            .cloned()
+            .collect_vec();
+        assert_eq!(
+            navigation_and_escape_events,
+            vec!["Navigate(Down)", "Navigate(Up)", "Escape"]
+        );
+    });
+}
