@@ -358,23 +358,6 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
             )
             .with_group(bindings::BindingGroup::Settings.as_str()),
         ]);
-
-        // Add a toggle alias for "Zen mode".
-        toggle_binding_pairs.push(
-            ToggleSettingActionPair::new(
-                "zen mode",
-                builder(SettingsAction::AppearancePageToggle(
-                    AppearancePageAction::ToggleWorkspaceDecorationVisibility,
-                )),
-                context,
-                flags::HIDE_WORKSPACE_DECORATIONS_CONTEXT_FLAG,
-            )
-            .is_supported_on_current_platform(
-                TabSettings::as_ref(app)
-                    .workspace_decoration_visibility
-                    .is_supported_on_current_platform(),
-            ),
-        )
     }
 
     if FeatureFlag::VerticalTabs.is_enabled() {
@@ -477,7 +460,6 @@ pub enum AppearancePageAction {
     ToggleShowDockIcon,
     SetCursorType(CursorDisplayType),
     SetWorkspaceDecorationVisibility(WorkspaceDecorationVisibility),
-    ToggleWorkspaceDecorationVisibility,
     ToggleJumpToBottomOfBlockButton,
     ToggleShowBlockDividers,
     ToggleCompactMode,
@@ -617,7 +599,6 @@ impl TypedActionView for AppearanceSettingsPageView {
             SetWorkspaceDecorationVisibility(value) => {
                 self.set_workspace_decoration_visibility(*value, ctx)
             }
-            ToggleWorkspaceDecorationVisibility => self.toggle_workspace_decoration_visiblity(ctx),
             ToggleJumpToBottomOfBlockButton => self.toggle_jump_to_bottom_of_block_button(ctx),
             ToggleShowBlockDividers => self.toggle_show_block_dividers(ctx),
             ToggleCompactMode => self.toggle_compact_mode(ctx),
@@ -2540,28 +2521,6 @@ impl AppearanceSettingsPageView {
             );
             prev_value
         });
-        send_telemetry_from_ctx!(
-            TelemetryEvent::ToggleWorkspaceDecorationVisibility {
-                previous_value,
-                new_value
-            },
-            ctx
-        );
-    }
-
-    /// Toggle among the supported workspace decoration visibility values.
-    fn toggle_workspace_decoration_visiblity(&mut self, ctx: &mut ViewContext<Self>) {
-        let (new_value, previous_value) =
-            TabSettings::handle(ctx).update(ctx, |tab_settings, ctx| {
-                let previous_value = *tab_settings.workspace_decoration_visibility.value();
-                let new_value = previous_value.toggled();
-                report_if_error!(
-                    tab_settings
-                        .workspace_decoration_visibility
-                        .set_value(new_value, ctx)
-                );
-                (new_value, previous_value)
-            });
         send_telemetry_from_ctx!(
             TelemetryEvent::ToggleWorkspaceDecorationVisibility {
                 previous_value,

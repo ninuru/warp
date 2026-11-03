@@ -38,7 +38,7 @@ pub fn initialize_settings_for_tests_with_mode(
         InputSettings, LocalControlSettings, NativePreferenceSettings, PaneSettings,
         SameLinePromptBlockSettings, ScrollSettings, SelectionSettings,
         SharedObjectLimitBannerSettings, SshSettings, ThemeSettings, TuiVoiceSettings,
-        VimBannerSettings, init_and_register_user_preferences,
+        VimBannerSettings, ZenModeSettings, init_and_register_user_preferences,
     };
     use crate::terminal::BlockListSettings;
     use crate::terminal::general_settings::GeneralSettings;
@@ -122,6 +122,7 @@ pub fn initialize_settings_for_tests_with_mode(
     SharedSessionSettings::register(app);
     CodeSettings::register(app);
     SemanticSelection::register(app);
+    ZenModeSettings::register(app);
 
     app.update(|ctx| {
         // Add settings models that are backed by secure storage, not user preferences.

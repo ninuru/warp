@@ -165,6 +165,9 @@ use super::util::{
     PaneViewLocator, TabMovement, TerminalSessionFallbackBehavior, WelcomeTipsViewState,
     WorkspaceMouseStates, WorkspaceState, team_switcher_menu_items,
 };
+use super::zen_mode::{
+    ZenModeOptions, ZenModeState, ZenModeTransition, ZenPanels, zen_mode_shows_tab_bar,
+};
 use super::{ActiveSession, TabBarDropTargetData, TabBarLocation, WorkspaceRegistry, util};
 use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
@@ -357,8 +360,8 @@ use crate::settings::{
     AppEditorSettings, BlockVisibilitySettings, ChangelogSettings, CodeSettings,
     CodeSettingsChangedEvent, CtrlTabBehavior, CursorBlink, DebugSettings, DefaultSessionMode,
     FontSettings, GPUSettings, InputModeSettings, InputSettings, MonospaceFontSize, PaneSettings,
-    PrivacySettings, SelectionSettings, Settings, SshSettings, ThemeSettings, active_theme_kind,
-    respect_system_theme,
+    PrivacySettings, SelectionSettings, Settings, SshSettings, ThemeSettings, ZenModeSettings,
+    active_theme_kind, respect_system_theme,
 };
 use crate::settings_view::environments_page::EnvironmentsPage;
 use crate::settings_view::handoff_environment_creation_modal::{
@@ -1058,6 +1061,8 @@ pub struct Workspace {
     tab_mru_order: Vec<EntityId>,
     pub(crate) hovered_tab_index: Option<TabBarHoverIndex>,
     tab_bar_hover_state: MouseStateHandle,
+    zen_mode: ZenModeState,
+    zen_mode_pane_group: Option<WeakViewHandle<PaneGroup>>,
     tab_fixed_width: Option<f32>,
     traffic_light_mouse_states: TrafficLightMouseStates,
     /// Tab groups in this workspace, keyed by id.
@@ -3466,6 +3471,8 @@ impl Workspace {
             tab_mru_order: Vec::new(),
             hovered_tab_index: None,
             tab_bar_hover_state: Default::default(),
+            zen_mode: ZenModeState::default(),
+            zen_mode_pane_group: None,
             traffic_light_mouse_states: Default::default(),
             tab_groups: HashMap::new(),
             active_project: ProjectRef::home(),
@@ -14598,6 +14605,16 @@ impl Workspace {
             .as_ref(app)
             .any_pane_being_dragged(app);
 
+        if self.zen_mode.is_active() {
+            let reveal_on_hover = *ZenModeSettings::as_ref(app).reveal_tab_bar_on_hover;
+            let tab_bar_needed = is_pane_being_dragged || is_tab_menu_open;
+            return if zen_mode_shows_tab_bar(reveal_on_hover, is_hovered, tab_bar_needed) {
+                ShowTabBar::Stacked
+            } else {
+                ShowTabBar::Hidden
+            };
+        }
+
         let workspace_decoration_visibility = TabSettings::as_ref(app)
             .workspace_decoration_visibility
             .value();
@@ -14641,6 +14658,113 @@ impl Workspace {
     #[cfg(not(target_os = "macos"))]
     pub fn sync_window_button_visibility(&self, _: &mut ViewContext<Self>) {
         // Only macOS uses native window buttons.
+    }
+
+    pub fn is_zen_mode_active(&self) -> bool {
+        self.zen_mode.is_active()
+    }
+
+    pub fn is_tab_bar_shown(&self, app: &AppContext) -> bool {
+        self.tab_bar_mode(app).has_tab_bar()
+    }
+
+    fn zen_mode_options(app: &AppContext) -> ZenModeOptions {
+        let settings = ZenModeSettings::as_ref(app);
+        ZenModeOptions {
+            enter_fullscreen: *settings.enter_fullscreen,
+            hide_panels: *settings.hide_panels,
+            follow_window_fullscreen: *settings.follow_window_fullscreen,
+        }
+    }
+
+    fn is_window_fullscreen(&self, app: &AppContext) -> bool {
+        app.windows()
+            .platform_window(self.window_id)
+            .is_some_and(|window| window.fullscreen_state() == FullscreenState::Fullscreen)
+    }
+
+    fn open_zen_panels(&self, app: &AppContext) -> ZenPanels {
+        let pane_group = self.active_tab_pane_group().as_ref(app);
+        ZenPanels {
+            vertical_tabs: FeatureFlag::VerticalTabs.is_enabled()
+                && *TabSettings::as_ref(app).use_vertical_tabs
+                && self.vertical_tabs_panel_open,
+            left: pane_group.left_panel_open,
+            right: pane_group.right_panel_open,
+        }
+    }
+
+    fn toggle_zen_mode(&mut self, ctx: &mut ViewContext<Self>) {
+        let options = Self::zen_mode_options(ctx);
+        let is_fullscreen = self.is_window_fullscreen(ctx);
+        let open_panels = self.open_zen_panels(ctx);
+        let transition = self.zen_mode.toggle(options, is_fullscreen, open_panels);
+        self.apply_zen_mode_transition(transition, ctx);
+    }
+
+    fn sync_zen_mode_with_window_fullscreen(&mut self, ctx: &mut ViewContext<Self>) {
+        let options = Self::zen_mode_options(ctx);
+        let is_fullscreen = self.is_window_fullscreen(ctx);
+        let open_panels = self.open_zen_panels(ctx);
+        if let Some(transition) =
+            self.zen_mode
+                .window_fullscreen_changed(is_fullscreen, options, open_panels)
+        {
+            self.apply_zen_mode_transition(transition, ctx);
+        }
+    }
+
+    fn apply_zen_mode_transition(
+        &mut self,
+        transition: ZenModeTransition,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let toggle_fullscreen = match transition {
+            ZenModeTransition::Enter {
+                request_fullscreen,
+                close_panels,
+            } => {
+                self.zen_mode_pane_group = Some(self.active_tab_pane_group().downgrade());
+                self.set_zen_panels_open(close_panels, false, ctx);
+                request_fullscreen
+            }
+            ZenModeTransition::Exit {
+                leave_fullscreen,
+                reopen_panels,
+            } => {
+                self.set_zen_panels_open(reopen_panels, true, ctx);
+                leave_fullscreen
+            }
+        };
+        if toggle_fullscreen {
+            let window_id = self.window_id;
+            WindowManager::handle(ctx).update(ctx, |manager, ctx| {
+                manager.toggle_fullscreen(window_id, ctx);
+            });
+        }
+        self.sync_window_button_visibility(ctx);
+        ctx.notify();
+    }
+
+    fn set_zen_panels_open(&mut self, panels: ZenPanels, open: bool, ctx: &mut ViewContext<Self>) {
+        if panels.vertical_tabs && self.vertical_tabs_panel_open != open {
+            self.toggle_vertical_tabs_panel(ctx);
+        }
+        let pane_group = self.active_tab_pane_group().clone();
+        if open
+            && self
+                .zen_mode_pane_group
+                .take()
+                .is_none_or(|zen_pane_group| zen_pane_group.id() != pane_group.id())
+        {
+            return;
+        }
+        if panels.left && pane_group.as_ref(ctx).left_panel_open != open {
+            self.toggle_left_panel(ctx);
+        }
+        if panels.right && pane_group.as_ref(ctx).right_panel_open != open {
+            self.toggle_right_panel(&pane_group, ctx);
+        }
     }
 
     /// Updates the titlebar height to match the scaled tab bar height.
@@ -19283,6 +19407,9 @@ impl Workspace {
     fn handle_window_state_change(&mut self, event: &StateEvent, ctx: &mut ViewContext<Self>) {
         match &event {
             StateEvent::ValueChanged { current, previous } => {
+                if FeatureFlag::FullScreenZenMode.is_enabled() {
+                    self.sync_zen_mode_with_window_fullscreen(ctx);
+                }
                 let did_window_change_focus =
                     WindowManager::did_window_change_focus(self.window_id, current, previous);
                 let window_lost_focus = previous.active_window == Some(self.window_id)
@@ -23566,14 +23693,22 @@ impl Workspace {
             context.set.insert(flags::FEATURE_INTRO_MODAL_OPEN);
         }
 
-        if tab_settings
-            .workspace_decoration_visibility
-            .value()
-            .hides_decorations_by_default()
-        {
+        let zen_mode_settings = ZenModeSettings::as_ref(app);
+        if *zen_mode_settings.enter_fullscreen {
+            context.set.insert(flags::ZEN_MODE_ENTER_FULLSCREEN_FLAG);
+        }
+        if *zen_mode_settings.reveal_tab_bar_on_hover {
             context
                 .set
-                .insert(flags::HIDE_WORKSPACE_DECORATIONS_CONTEXT_FLAG);
+                .insert(flags::ZEN_MODE_REVEAL_TAB_BAR_ON_HOVER_FLAG);
+        }
+        if *zen_mode_settings.hide_panels {
+            context.set.insert(flags::ZEN_MODE_HIDE_PANELS_FLAG);
+        }
+        if *zen_mode_settings.follow_window_fullscreen {
+            context
+                .set
+                .insert(flags::ZEN_MODE_FOLLOW_WINDOW_FULLSCREEN_FLAG);
         }
 
         if *alias_expansion_settings.alias_expansion_enabled.value() {
@@ -25079,6 +25214,11 @@ impl TypedActionView for Workspace {
             OpenCodeReviewPanel(_) => {}
             ToggleVerticalTabsPanel => {
                 self.toggle_vertical_tabs_panel(ctx);
+            }
+            ToggleZenMode => {
+                if FeatureFlag::FullScreenZenMode.is_enabled() {
+                    self.toggle_zen_mode(ctx);
+                }
             }
             OpenVerticalTabsPanel => {
                 if !self.vertical_tabs_panel_open {

@@ -108,22 +108,6 @@ settings::macros::implement_setting_for_enum!(
 );
 
 impl WorkspaceDecorationVisibility {
-    /// Choose a visibility setting that's logically opposite from this one.
-    pub fn toggled(self) -> Self {
-        // If we add other variants, there should still be logical opposites for each. For example,
-        // toggling from any form of hidden workspace decorations should re-enable them.
-        match self {
-            WorkspaceDecorationVisibility::AlwaysShow => WorkspaceDecorationVisibility::OnHover,
-            WorkspaceDecorationVisibility::OnHover => WorkspaceDecorationVisibility::HideFullscreen,
-            WorkspaceDecorationVisibility::HideFullscreen => WorkspaceDecorationVisibility::OnHover,
-        }
-    }
-
-    /// True if this is a setting where workspace decorations are hidden by default.
-    pub fn hides_decorations_by_default(self) -> bool {
-        matches!(self, WorkspaceDecorationVisibility::OnHover,)
-    }
-
     /// True if *window* decorations should be shown.
     pub fn show_window_decorations(self) -> bool {
         !matches!(self, WorkspaceDecorationVisibility::OnHover)

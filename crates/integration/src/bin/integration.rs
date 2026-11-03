@@ -375,6 +375,7 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
 
     register_test!(test_context_chips_prompt_at_bootstrap);
     register_test!(test_docker_context_selector);
+    register_test!(test_toggle_zen_mode_hides_and_restores_tab_bar);
 
     register_test!(test_cycle_active_tab_color_with_keybinding);
     register_test!(test_active_session_follows_focus);

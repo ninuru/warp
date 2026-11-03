@@ -23,6 +23,7 @@ pub mod tab_settings;
 mod toast_stack;
 pub mod util;
 pub mod view;
+mod zen_mode;
 
 pub use action::{
     AutoCloudHandoffTrigger, CommandSearchOptions, InitContent, RestoreConversationLayout,
@@ -839,6 +840,14 @@ pub fn init(app: &mut AppContext) {
         .with_group(bindings::BindingGroup::Navigation.as_str())
         .with_enabled(|| FeatureFlag::VerticalTabs.is_enabled())
         .with_key_binding(cmd_or_ctrl_shift("b")),
+        EditableBinding::new(
+            "workspace:toggle_zen_mode",
+            BindingDescription::new("Toggle Zen Mode"),
+            WorkspaceAction::ToggleZenMode,
+        )
+        .with_context_predicate(id!("Workspace"))
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_enabled(|| FeatureFlag::FullScreenZenMode.is_enabled()),
         EditableBinding::new(
             LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME,
             BindingDescription::new("Left Panel: Project explorer"),
@@ -1698,6 +1707,14 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
             BindingDescription::new("Open Settings: Code"),
             WorkspaceAction::ShowSettingsPage(SettingsSection::CodeIndexing),
         )
+        .with_group(bindings::BindingGroup::Settings.as_str())
+        .with_context_predicate(id!("Workspace")),
+        EditableBinding::new(
+            "workspace:show_settings_zen_mode_page",
+            BindingDescription::new("Open Settings: Zen Mode"),
+            WorkspaceAction::ShowSettingsPage(SettingsSection::ZenMode),
+        )
+        .with_enabled(|| FeatureFlag::FullScreenZenMode.is_enabled())
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
         EditableBinding::new(
