@@ -775,6 +775,7 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     app.register_fixed_bindings([
         FixedBinding::new("down", SettingsAction::Down, context.clone()),
         FixedBinding::new("up", SettingsAction::Up, context.clone()),
+        FixedBinding::new("ctrl-d", SettingsAction::Close, context.clone()),
     ]);
 }
 

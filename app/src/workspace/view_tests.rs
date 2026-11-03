@@ -5824,3 +5824,38 @@ fn test_tab_group_rename_blur_does_not_commit_unfinished_name() {
         });
     });
 }
+
+/// Pressing ctrl-d while the settings tab has focus should close it, the same way ctrl-d ends a
+/// shell session.
+#[test]
+fn test_ctrl_d_closes_settings_tab() {
+    use warpui::keymap::Keystroke;
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        app.update(crate::editor::init);
+        let workspace = mock_workspace(&mut app);
+        let window_id = app.read(|ctx| workspace.window_id(ctx));
+
+        workspace.update(&mut app, |workspace, ctx| {
+            workspace.handle_action(&WorkspaceAction::ShowSettings, ctx);
+        });
+        let settings_pane_open =
+            |app: &App| app.read(|ctx| SettingsPaneManager::as_ref(ctx).find_pane(window_id));
+        assert!(settings_pane_open(&app).is_some());
+
+        let responder_chain = app.read(|ctx| {
+            let focused = ctx
+                .focused_view_id(window_id)
+                .expect("a view should be focused");
+            ctx.view_ancestors(window_id, focused)
+        });
+        let keystroke = Keystroke::parse("ctrl-d").unwrap();
+        let handled = app
+            .dispatch_keystroke(window_id, &responder_chain, &keystroke, false)
+            .unwrap();
+
+        assert!(handled);
+        assert!(settings_pane_open(&app).is_none());
+    });
+}
