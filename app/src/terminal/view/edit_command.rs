@@ -16,6 +16,23 @@ impl TerminalView {
         ctx.emit(Event::EditCommandInEditor { text, editor });
     }
 
+    pub(crate) fn run_command_editor(
+        &mut self,
+        command: &str,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        if self.has_pending_command_or_awaiting_completion(ctx) {
+            return false;
+        }
+        let started = self
+            .input
+            .update(ctx, |input, ctx| input.try_execute_command(command, ctx));
+        if started {
+            self.awaiting_pending_command_completion = true;
+        }
+        started
+    }
+
     pub(crate) fn apply_edited_command(&mut self, text: &str, ctx: &mut ViewContext<Self>) {
         self.input.update(ctx, |input, ctx| {
             input.replace_buffer_content(text, ctx);
