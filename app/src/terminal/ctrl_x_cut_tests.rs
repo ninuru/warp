@@ -1,23 +1,14 @@
 use std::sync::atomic::Ordering;
 
-use settings::Setting as _;
 use warp_core::features::FeatureFlag;
+use warpui::App;
 use warpui::platform::OperatingSystem;
-use warpui::{App, SingletonEntity};
 
-use super::{CTRL_X_CUT_ENABLED, CtrlXCutState, ctrl_x_cut_enabled};
-use crate::terminal::keys_settings::KeysSettings;
+use super::{CTRL_X_CUT_ENABLED, CtrlXCutState, ctrl_x_cut_enabled, set_enabled};
 use crate::test_util::settings::initialize_settings_for_tests;
 
 fn set_ctrl_x_cut(app: &mut App, enabled: bool) {
-    app.update(|ctx| {
-        KeysSettings::handle(ctx).update(ctx, |settings, ctx| {
-            settings
-                .ctrl_x_cut
-                .set_value(enabled, ctx)
-                .expect("ctrl_x_cut is stored");
-        });
-    });
+    app.update(|ctx| set_enabled(enabled, ctx));
 }
 
 #[test]

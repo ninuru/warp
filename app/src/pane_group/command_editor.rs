@@ -17,7 +17,7 @@ fn strip_trailing_newlines(text: &str) -> &str {
 }
 
 fn editor_command(path: &Path, editor: Option<&str>) -> String {
-    let editor = editor.unwrap_or("${VISUAL:-${EDITOR:-vi}}");
+    let editor = editor.unwrap_or("vi");
     let path = path.to_string_lossy();
     let quoted_path = shell_words::quote(&path);
     format!(" {editor} {quoted_path}")

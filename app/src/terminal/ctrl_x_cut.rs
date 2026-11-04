@@ -1,10 +1,16 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use settings::Setting as _;
 use warp_core::features::FeatureFlag;
+use warp_errors::report_if_error;
+use warpui::keymap::FixedBinding;
 use warpui::platform::OperatingSystem;
-use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, id};
 
 use crate::terminal::keys_settings::KeysSettings;
+use crate::terminal::view::TerminalAction;
+
+pub const CTRL_X_CUT_CONTEXT: &str = "CtrlXCutEnabled";
 
 static CTRL_X_CUT_ENABLED: AtomicBool = AtomicBool::new(true);
 
@@ -16,6 +22,26 @@ pub fn ctrl_x_cut_enabled() -> bool {
 
 pub fn init(ctx: &mut AppContext) {
     ctx.add_singleton_model(CtrlXCutState::new);
+    ctx.register_fixed_bindings([
+        FixedBinding::empty(
+            "Enable Ctrl-X as Cut",
+            TerminalAction::SetCtrlXCut(true),
+            id!("Terminal") & !id!(CTRL_X_CUT_CONTEXT),
+        )
+        .with_enabled(|| !OperatingSystem::get().is_mac()),
+        FixedBinding::empty(
+            "Disable Ctrl-X as Cut",
+            TerminalAction::SetCtrlXCut(false),
+            id!("Terminal") & id!(CTRL_X_CUT_CONTEXT),
+        )
+        .with_enabled(|| !OperatingSystem::get().is_mac()),
+    ]);
+}
+
+pub fn set_enabled(enabled: bool, ctx: &mut AppContext) {
+    KeysSettings::handle(ctx).update(ctx, |settings, ctx| {
+        report_if_error!(settings.ctrl_x_cut.set_value(enabled, ctx));
+    });
 }
 
 pub struct CtrlXCutState;

@@ -15,16 +15,13 @@ fn strip_trailing_newlines_removes_only_trailing_line_breaks() {
 }
 
 #[test]
-fn editor_command_quotes_path_and_falls_back_to_environment_editor() {
+fn editor_command_quotes_path_and_falls_back_to_vi() {
     let path = std::path::Path::new("/tmp/my cmd.sh");
     assert_eq!(
         editor_command(path, Some("nvim -u NONE")),
         " nvim -u NONE '/tmp/my cmd.sh'"
     );
-    assert_eq!(
-        editor_command(path, None),
-        " ${VISUAL:-${EDITOR:-vi}} '/tmp/my cmd.sh'"
-    );
+    assert_eq!(editor_command(path, None), " vi '/tmp/my cmd.sh'");
 }
 
 fn origin_pane(panes: &PaneGroup, ctx: &AppContext) -> TerminalPaneId {
