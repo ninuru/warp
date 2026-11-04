@@ -1693,6 +1693,95 @@ fn test_dispatch_keystroke() -> Result<()> {
 }
 
 #[test]
+fn test_dispatch_keystroke_pending_sequence_takes_priority() -> Result<()> {
+    struct View {
+        name: &'static str,
+        keymap_context: keymap::Context,
+        handled: Rc<RefCell<Vec<(&'static str, &'static str)>>>,
+    }
+
+    impl Entity for View {
+        type Event = ();
+    }
+
+    impl super::View for View {
+        fn render(&self, _: &AppContext) -> Box<dyn Element> {
+            Empty::new().finish()
+        }
+
+        fn ui_name() -> &'static str {
+            "View"
+        }
+
+        fn keymap_context(&self, _: &AppContext) -> keymap::Context {
+            self.keymap_context.clone()
+        }
+    }
+
+    #[derive(Debug)]
+    struct Action(&'static str);
+
+    impl TypedActionView for View {
+        type Action = Action;
+
+        fn handle_action(&mut self, action: &Action, _: &mut ViewContext<Self>) {
+            self.handled.borrow_mut().push((self.name, action.0));
+        }
+    }
+
+    impl View {
+        fn new(
+            name: &'static str,
+            handled: Rc<RefCell<Vec<(&'static str, &'static str)>>>,
+        ) -> Self {
+            let mut keymap_context = keymap::Context::default();
+            keymap_context.set.insert(name);
+            View {
+                name,
+                keymap_context,
+                handled,
+            }
+        }
+    }
+
+    App::test((), |mut app| async move {
+        let handled = Rc::new(RefCell::new(Vec::new()));
+        let (window_id, parent) = app.add_window(WindowStyle::NotStealFocus, {
+            let handled = handled.clone();
+            move |_| View::new("parent", handled)
+        });
+        let child = app.add_typed_action_view(window_id, {
+            let handled = handled.clone();
+            move |_| View::new("child", handled)
+        });
+
+        app.update(|ctx| {
+            ctx.register_fixed_bindings(vec![
+                keymap::FixedBinding::new("ctrl-x ctrl-e", Action("sequence"), id!("parent")),
+                keymap::FixedBinding::new("ctrl-e", Action("single"), id!("child")),
+            ])
+        });
+
+        let chain = [parent.id(), child.id()];
+
+        assert!(app.dispatch_keystroke(window_id, &chain, &Keystroke::parse("ctrl-e")?, false)?);
+        assert_eq!(handled.borrow().as_slice(), &[("child", "single")]);
+        handled.borrow_mut().clear();
+
+        assert!(app.dispatch_keystroke(window_id, &chain, &Keystroke::parse("ctrl-x")?, false)?);
+        assert!(handled.borrow().is_empty());
+
+        assert!(app.dispatch_keystroke(window_id, &chain, &Keystroke::parse("ctrl-e")?, false)?);
+        assert_eq!(handled.borrow().as_slice(), &[("parent", "sequence")]);
+        handled.borrow_mut().clear();
+
+        assert!(app.dispatch_keystroke(window_id, &chain, &Keystroke::parse("ctrl-e")?, false)?);
+        assert_eq!(handled.borrow().as_slice(), &[("child", "single")]);
+        Ok(())
+    })
+}
+
+#[test]
 fn test_dispatch_keystroke_typed_action() -> Result<()> {
     struct View {
         id: usize,

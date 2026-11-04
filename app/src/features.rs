@@ -47,6 +47,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::PrefixKeys,
         #[cfg(feature = "project_sessions")]
         FeatureFlag::ProjectSessions,
+        #[cfg(feature = "edit_command_in_editor")]
+        FeatureFlag::EditCommandInEditor,
         #[cfg(feature = "ligatures")]
         FeatureFlag::Ligatures,
         #[cfg(feature = "selectable_prompt")]

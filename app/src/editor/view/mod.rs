@@ -116,6 +116,7 @@ use crate::settings::{
 };
 use crate::settings_view::flags;
 use crate::suggestions::ignored_suggestions_model::{IgnoredSuggestionsModel, SuggestionType};
+use crate::terminal::ctrl_x_cut::ctrl_x_cut_enabled;
 use crate::terminal::grid_size_util::grid_cell_dimensions;
 use crate::terminal::model::block::BlockId;
 use crate::themes::theme::Fill;
@@ -244,7 +245,8 @@ pub fn init(ctx: &mut AppContext) {
             EditorAction::Cut,
             "Cut",
             id!("EditorView") & !id!("IMEOpen"),
-        ),
+        )
+        .with_enabled(ctrl_x_cut_enabled),
         // Bindings for paste require the StandardAction and CustomAction binding to work on all platforms.
         FixedBinding::custom(
             CustomAction::Paste,

@@ -85,6 +85,17 @@ define_settings_group!(KeysSettings, settings: [
         description: "Configuration for the tmux-style prefix key and its bindings.",
         feature_flag: FeatureFlag::PrefixKeys,
     }
+    ctrl_x_cut: CtrlXCutSetting {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "keys.ctrl_x_cut",
+        description: "Whether ctrl-x cuts in the input editor. Set to false to free ctrl-x for key sequences such as ctrl-x ctrl-e.",
+        feature_flag: FeatureFlag::EditCommandInEditor,
+    }
 ]);
 
 impl KeysSettings {

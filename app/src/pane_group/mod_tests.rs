@@ -121,7 +121,7 @@ use crate::{
     AgentNotificationsModel, GlobalResourceHandles, GlobalResourceHandlesProvider, experiments,
 };
 
-fn initialize_app(app: &mut App) {
+pub(super) fn initialize_app(app: &mut App) {
     initialize_app_with_history(app, Vec::new());
 }
 
@@ -241,7 +241,7 @@ fn initialize_app_with_history(app: &mut App, conversations: Vec<AgentConversati
     app.add_singleton_model(remote_server::manager::RemoteServerManager::new);
 }
 
-struct MockOptions {
+pub(super) struct MockOptions {
     layout: PanesLayout,
     window_bounds: WindowBounds,
 }
@@ -258,7 +258,7 @@ impl Default for MockOptions {
     }
 }
 
-fn mock_pane_group(app: &mut App, options: MockOptions) -> ViewHandle<PaneGroup> {
+pub(super) fn mock_pane_group(app: &mut App, options: MockOptions) -> ViewHandle<PaneGroup> {
     let tips_model = app.add_model(|_| TipsCompleted::default());
     let (_, pane_group) =
         app.add_window_with_bounds(WindowStyle::NotStealFocus, options.window_bounds, |ctx| {

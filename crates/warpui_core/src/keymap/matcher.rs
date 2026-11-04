@@ -303,6 +303,12 @@ impl Matcher {
         self.keymap.bindings()
     }
 
+    pub fn has_pending(&self, view_id: EntityId) -> bool {
+        self.pending
+            .get(&view_id)
+            .is_some_and(|pending| !pending.keystrokes.is_empty())
+    }
+
     pub fn push_keystroke(
         &mut self,
         keystroke: Keystroke,

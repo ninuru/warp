@@ -977,6 +977,7 @@ fn handle_terminal_view_event(
                 }
             }
             Event::Exited => {
+                group.abandon_command_editor(terminal_pane_id, ctx);
                 // If the shell process exited before it successfully bootstrapped,
                 // keep the pane open.  There might be useful information visible
                 // in the output, and if this was the first shell spawned when the
@@ -1545,6 +1546,12 @@ fn handle_terminal_view_event(
                     request.clone(),
                     ctx,
                 );
+            }
+            Event::EditCommandInEditor { text, editor } => {
+                group.open_command_editor(terminal_pane_id, text, editor.as_deref(), ctx);
+            }
+            Event::PendingCommandCompleted { succeeded } => {
+                group.finish_command_editor(terminal_pane_id, *succeeded, ctx);
             }
             _ => {}
         }

@@ -176,6 +176,7 @@ use crate::{cmd_or_ctrl_shift, send_telemetry_from_ctx};
 
 mod ambient_pane_restoration;
 mod child_agent;
+mod command_editor;
 pub(crate) use child_agent::materialization::{
     ChildPaneMaterialization, decide_child_pane_materialization,
 };
@@ -966,6 +967,8 @@ pub struct PaneGroup {
 
     /// Tab-level custom title set via the rename-tab flow.
     custom_title: Option<String>,
+
+    command_editor_sessions: HashMap<TerminalPaneId, command_editor::CommandEditorSession>,
 }
 
 /// A cloud orchestration parent whose direct children (per the server's
@@ -3201,6 +3204,7 @@ impl PaneGroup {
             transitively_shared_child_panes: HashMap::new(),
             child_agent_origin: None,
             custom_title: None,
+            command_editor_sessions: HashMap::new(),
         };
 
         // Notify any restored panes that they belong to this pane group.

@@ -32,6 +32,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("s", "workspace:toggle_navigation_palette"),
     ("$", "workspace:rename_project"),
     ("[", "terminal:enter_copy_mode"),
+    ("e", "terminal:edit_command_in_editor"),
 ];
 const DEFAULT_ROOT_BINDINGS: &[(&str, &str)] = &[
     ("alt-1", "workspace:activate_first_tab"),

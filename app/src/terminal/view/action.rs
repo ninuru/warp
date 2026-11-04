@@ -189,6 +189,8 @@ pub enum TerminalAction {
     End,
     KeyboardSelectText(SelectionDirection),
     EnterCopyMode,
+    EditCommandInEditor,
+    SetCtrlXCut(bool),
     CopyModeMove(CopyModeMotion),
     CopyModeToggleVisual(SelectionType),
     CopyModeSwapAnchor,
@@ -568,6 +570,8 @@ impl fmt::Debug for TerminalAction {
             End => f.write_str("End"),
             KeyboardSelectText(direction) => write!(f, "KeyboardSelectText({direction:?})"),
             EnterCopyMode => f.write_str("EnterCopyMode"),
+            EditCommandInEditor => f.write_str("EditCommandInEditor"),
+            SetCtrlXCut(enabled) => write!(f, "SetCtrlXCut({enabled})"),
             CopyModeMove(motion) => write!(f, "CopyModeMove({motion:?})"),
             CopyModeToggleVisual(selection_type) => {
                 write!(f, "CopyModeToggleVisual({selection_type:?})")
