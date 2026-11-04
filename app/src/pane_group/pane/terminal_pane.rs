@@ -977,7 +977,7 @@ fn handle_terminal_view_event(
                 }
             }
             Event::Exited => {
-                group.abandon_command_editor(terminal_pane_id, ctx);
+                group.abandon_command_editor(terminal_pane_id);
                 // If the shell process exited before it successfully bootstrapped,
                 // keep the pane open.  There might be useful information visible
                 // in the output, and if this was the first shell spawned when the

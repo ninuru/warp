@@ -1,9 +1,12 @@
-use warpui::{App, AppContext, ViewContext};
+use warpui::{App, AppContext, SingletonEntity, ViewContext, ViewHandle};
 
 use super::{editor_command, strip_trailing_newlines};
 use crate::features::FeatureFlag;
 use crate::pane_group::tests::{initialize_app, mock_pane_group};
 use crate::pane_group::{PaneGroup, PaneId, TerminalPaneId};
+use crate::terminal::history::History;
+use crate::terminal::model::bootstrap::BootstrapStage;
+use crate::test_util::assert_eventually;
 
 #[test]
 fn strip_trailing_newlines_removes_only_trailing_line_breaks() {
@@ -22,6 +25,25 @@ fn editor_command_quotes_path_and_falls_back_to_vi() {
         " nvim -u NONE '/tmp/my cmd.sh'"
     );
     assert_eq!(editor_command(path, None), " vi '/tmp/my cmd.sh'");
+}
+
+async fn ready_pane_group(app: &mut App) -> ViewHandle<PaneGroup> {
+    let pane_group = mock_pane_group(app, Default::default());
+    assert_eventually!(
+        2000 => {
+            pane_group.read(app, |panes, ctx| {
+                let origin = origin_pane(panes, ctx);
+                let view = panes.terminal_view_from_pane_id(origin, ctx).unwrap();
+                let model = view.as_ref(ctx).model.lock();
+                let block = model.block_list().active_block();
+                block.bootstrap_stage() == BootstrapStage::PostBootstrapPrecmd
+                    && !block.is_active_and_long_running()
+                    && block.session_id().is_some_and(|id| History::as_ref(ctx).is_appendable(&id))
+            })
+        },
+        "terminal did not finish bootstrapping"
+    );
+    pane_group
 }
 
 fn origin_pane(panes: &PaneGroup, ctx: &AppContext) -> TerminalPaneId {
@@ -65,11 +87,11 @@ fn only_session(panes: &PaneGroup) -> (TerminalPaneId, std::path::PathBuf) {
 }
 
 #[test]
-fn successful_edit_replaces_origin_input_and_closes_editor_pane() {
+fn successful_edit_replaces_input_in_the_same_pane() {
     let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let pane_group = mock_pane_group(&mut app, Default::default());
+        let pane_group = ready_pane_group(&mut app).await;
 
         pane_group.update(&mut app, |panes, ctx| {
             let origin = origin_pane(panes, ctx);
@@ -77,9 +99,10 @@ fn successful_edit_replaces_origin_input_and_closes_editor_pane() {
 
             panes.open_command_editor(origin, "echo old", None, ctx);
 
-            assert_eq!(visible_panes(panes), 2);
+            assert_eq!(visible_panes(panes), 1);
             let (editor, path) = only_session(panes);
-            assert_ne!(editor, origin);
+            assert_eq!(editor, origin);
+            assert_eq!(buffer_text(panes, origin, ctx), "echo old");
             assert_eq!(std::fs::read_to_string(&path).unwrap(), "echo old");
 
             std::fs::write(&path, "echo new\n").unwrap();
@@ -94,11 +117,11 @@ fn successful_edit_replaces_origin_input_and_closes_editor_pane() {
 }
 
 #[test]
-fn failed_edit_keeps_origin_input_and_closes_editor_pane() {
+fn failed_edit_restores_original_input_in_the_same_pane() {
     let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let pane_group = mock_pane_group(&mut app, Default::default());
+        let pane_group = ready_pane_group(&mut app).await;
 
         pane_group.update(&mut app, |panes, ctx| {
             let origin = origin_pane(panes, ctx);
@@ -108,6 +131,7 @@ fn failed_edit_keeps_origin_input_and_closes_editor_pane() {
             let (editor, path) = only_session(panes);
 
             std::fs::write(&path, "echo new\n").unwrap();
+            set_buffer_text(panes, origin, "", ctx);
             panes.finish_command_editor(editor, false, ctx);
 
             assert_eq!(buffer_text(panes, origin, ctx), "echo old");
@@ -123,7 +147,7 @@ fn finishing_unrelated_pane_is_ignored() {
     let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let pane_group = mock_pane_group(&mut app, Default::default());
+        let pane_group = ready_pane_group(&mut app).await;
 
         pane_group.update(&mut app, |panes, ctx| {
             let origin = origin_pane(panes, ctx);
@@ -142,7 +166,7 @@ fn second_trigger_from_same_origin_reuses_editor_pane() {
     let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let pane_group = mock_pane_group(&mut app, Default::default());
+        let pane_group = ready_pane_group(&mut app).await;
 
         pane_group.update(&mut app, |panes, ctx| {
             let origin = origin_pane(panes, ctx);
@@ -150,7 +174,7 @@ fn second_trigger_from_same_origin_reuses_editor_pane() {
             panes.open_command_editor(origin, "echo one", None, ctx);
             panes.open_command_editor(origin, "echo two", None, ctx);
 
-            assert_eq!(visible_panes(panes), 2);
+            assert_eq!(visible_panes(panes), 1);
             let (editor, path) = only_session(panes);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), "echo one");
             assert_eq!(panes.focused_pane_id(ctx), PaneId::from(editor));
@@ -163,18 +187,61 @@ fn abandoned_editor_session_is_dropped_and_origin_refocused() {
     let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let pane_group = mock_pane_group(&mut app, Default::default());
+        let pane_group = ready_pane_group(&mut app).await;
 
         pane_group.update(&mut app, |panes, ctx| {
             let origin = origin_pane(panes, ctx);
 
             panes.open_command_editor(origin, "echo one", None, ctx);
             let (editor, path) = only_session(panes);
-            panes.abandon_command_editor(editor, ctx);
+            panes.abandon_command_editor(editor);
 
             assert!(panes.command_editor_sessions.is_empty());
             assert!(!path.exists());
             assert_eq!(panes.focused_pane_id(ctx), PaneId::from(origin));
+        });
+    })
+}
+
+#[test]
+fn unreadable_edited_file_restores_original_input() {
+    let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = ready_pane_group(&mut app).await;
+        pane_group.update(&mut app, |panes, ctx| {
+            let origin = origin_pane(panes, ctx);
+            set_buffer_text(panes, origin, "echo old", ctx);
+            panes.open_command_editor(origin, "echo old", None, ctx);
+            let (editor, path) = only_session(panes);
+            std::fs::remove_file(path).unwrap();
+            set_buffer_text(panes, origin, "", ctx);
+            panes.finish_command_editor(editor, true, ctx);
+            assert_eq!(buffer_text(panes, origin, ctx), "echo old");
+            assert_eq!(visible_panes(panes), 1);
+        });
+    })
+}
+
+#[test]
+fn pending_command_is_not_replaced_by_command_editor() {
+    let _flag = FeatureFlag::EditCommandInEditor.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = ready_pane_group(&mut app).await;
+        pane_group.update(&mut app, |panes, ctx| {
+            let origin = origin_pane(panes, ctx);
+            set_buffer_text(panes, origin, "echo queued", ctx);
+            let view = panes.terminal_view_from_pane_id(origin, ctx).unwrap();
+            view.update(ctx, |view, ctx| view.set_pending_command("", ctx));
+            panes.open_command_editor(origin, "echo queued", None, ctx);
+            assert!(panes.command_editor_sessions.is_empty());
+            assert_eq!(buffer_text(panes, origin, ctx), "echo queued");
+            assert!(
+                view.as_ref(ctx)
+                    .has_pending_command_or_awaiting_completion(ctx)
+            );
+            assert_eq!(visible_panes(panes), 1);
         });
     })
 }

@@ -5,10 +5,10 @@ use tempfile::TempPath;
 use warp_errors::report_error;
 use warpui::ViewContext;
 
-use super::{Direction, PaneGroup, TerminalPaneId};
+use super::{PaneGroup, TerminalPaneId};
 
 pub(super) struct CommandEditorSession {
-    origin: TerminalPaneId,
+    original_text: String,
     temp_path: TempPath,
 }
 
@@ -56,12 +56,8 @@ impl PaneGroup {
             self.command_editor_sessions.remove(&pane);
         }
 
-        if let Some(existing) = self
-            .command_editor_sessions
-            .iter()
-            .find_map(|(pane, session)| (session.origin == origin).then_some(*pane))
-        {
-            self.focus_pane(existing.into(), true, ctx);
+        if self.command_editor_sessions.contains_key(&origin) {
+            self.focus_pane(origin.into(), true, ctx);
             return;
         }
 
@@ -73,16 +69,22 @@ impl PaneGroup {
             }
         };
 
-        let editor_pane = self.insert_terminal_pane(Direction::Right, origin.into(), None, ctx);
-        let Some(editor_view) = self.terminal_view_from_pane_id(editor_pane, ctx) else {
+        let Some(editor_view) = self.terminal_view_from_pane_id(origin, ctx) else {
             report_error!("Could not get terminal view for the command editor pane");
             return;
         };
         let command = editor_command(&temp_path, editor);
-        editor_view.update(ctx, |view, ctx| view.set_pending_command(&command, ctx));
-        self.focus_pane(editor_pane.into(), true, ctx);
-        self.command_editor_sessions
-            .insert(editor_pane, CommandEditorSession { origin, temp_path });
+        self.command_editor_sessions.insert(
+            origin,
+            CommandEditorSession {
+                original_text: text.to_owned(),
+                temp_path,
+            },
+        );
+        let started = editor_view.update(ctx, |view, ctx| view.run_command_editor(&command, ctx));
+        if !started {
+            self.command_editor_sessions.remove(&origin);
+        }
     }
 
     pub(super) fn finish_command_editor(
@@ -95,35 +97,24 @@ impl PaneGroup {
             return;
         };
 
-        if succeeded {
+        let text = if succeeded {
             match std::fs::read_to_string(&session.temp_path) {
-                Ok(content) => {
-                    if let Some(origin_view) = self.terminal_view_from_pane_id(session.origin, ctx)
-                    {
-                        let command = strip_trailing_newlines(&content);
-                        origin_view
-                            .update(ctx, |view, ctx| view.apply_edited_command(command, ctx));
-                    }
-                }
+                Ok(content) => strip_trailing_newlines(&content).to_owned(),
                 Err(error) => {
                     log::warn!("Could not read the edited command back: {error}");
+                    session.original_text
                 }
             }
+        } else {
+            session.original_text
+        };
+        if let Some(view) = self.terminal_view_from_pane_id(editor_pane, ctx) {
+            view.update(ctx, |view, ctx| view.apply_edited_command(&text, ctx));
         }
-
-        self.close_pane(editor_pane.into(), ctx);
-        self.focus_pane(session.origin.into(), true, ctx);
     }
 
-    pub(super) fn abandon_command_editor(
-        &mut self,
-        editor_pane: TerminalPaneId,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let Some(session) = self.command_editor_sessions.remove(&editor_pane) else {
-            return;
-        };
-        self.focus_pane(session.origin.into(), true, ctx);
+    pub(super) fn abandon_command_editor(&mut self, editor_pane: TerminalPaneId) {
+        self.command_editor_sessions.remove(&editor_pane);
     }
 }
 
