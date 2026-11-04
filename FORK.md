@@ -82,6 +82,12 @@ Build with the flags you want enabled, for example once the `prefix_keys` flag o
 cargo build --bin warp-oss --features gui,prefix_keys
 ```
 
+Current fork flags: `prefix_keys` (prefix key table and copy mode), `project_sessions`
+(tmux-style projects) and `edit_command_in_editor` (`ctrl-x ctrl-e` (set
+`keys.ctrl_x_cut = false` in settings.toml so ctrl-x is free; the keyboard settings page shows only
+the first key of the chord) or prefix `e` opens the command input in `$EDITOR` in a split pane and
+puts the edited text back into the input).
+
 New logic goes into separate files, for example an `impl Workspace` block in
 `app/src/workspace/view/<feature>.rs` included by one `mod` line in `app/src/workspace/view.rs`,
 with only such minimal hooks in the large upstream files. This keeps rebases onto upstream small.

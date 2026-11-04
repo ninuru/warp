@@ -1970,6 +1970,10 @@ pub(crate) fn initialize_app(
         prefix_keys::init(ctx);
     }
 
+    if FeatureFlag::EditCommandInEditor.is_enabled() {
+        terminal::ctrl_x_cut::init(ctx);
+    }
+
     // Rewrite recognized Warp web URLs (sessions, Drive, settings, home) into local
     // intent URLs when possible so they open directly in the desktop app.
     ctx.set_before_open_url(|url_str, _ctx| {

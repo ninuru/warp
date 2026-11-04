@@ -2200,8 +2200,12 @@ impl AppContext {
         is_composing: bool,
     ) -> Result<bool> {
         let mut context_chain = self.contexts_from_responder_chain(window_id, responder_chain)?;
+        let (pending_first, rest): (Vec<usize>, Vec<usize>) = (0..context_chain.len())
+            .rev()
+            .partition(|&i| self.keystroke_matcher.has_pending(responder_chain[i]));
         let mut pending = false;
-        for (i, ctx) in context_chain.iter_mut().enumerate().rev() {
+        for i in pending_first.into_iter().chain(rest) {
+            let ctx = &mut context_chain[i];
             if is_composing {
                 ctx.set.insert("IMEOpen");
             }

@@ -7,6 +7,7 @@ pub(crate) mod blocklist_filter;
 mod bookmarks;
 mod context_menu;
 mod copy_mode_badge;
+mod edit_command;
 pub mod init;
 pub mod inline_banner;
 pub mod load_ai_conversation;
@@ -1943,7 +1944,13 @@ pub enum Event {
     },
     /// Emitted when a pending command (e.g. tab config setup commands) has
     /// been submitted and its block has completed.
-    PendingCommandCompleted,
+    PendingCommandCompleted {
+        succeeded: bool,
+    },
+    EditCommandInEditor {
+        text: String,
+        editor: Option<String>,
+    },
     SessionBootstrapped,
     AnonymousUserSignup,
     ShellSpawned(ShellType),
@@ -13179,7 +13186,9 @@ impl TerminalView {
                         if !command_succeeded {
                             self.pending_command_queue.clear();
                         }
-                        ctx.emit(Event::PendingCommandCompleted);
+                        ctx.emit(Event::PendingCommandCompleted {
+                            succeeded: command_succeeded,
+                        });
 
                         // If agent view entry was deferred until setup commands
                         // finished, enter it now (unless suppressed by onboarding).
@@ -28032,6 +28041,7 @@ impl TypedActionView for TerminalView {
             | End
             | KeyboardSelectText(_)
             | EnterCopyMode
+            | EditCommandInEditor
             | CopyModeMove(_)
             | CopyModeToggleVisual(_)
             | CopyModeSwapAnchor
@@ -28402,6 +28412,7 @@ impl TypedActionView for TerminalView {
             End => self.move_end(ctx),
             KeyboardSelectText(direction) => self.keyboard_select_text(ctx, direction),
             EnterCopyMode => self.enter_copy_mode(ctx),
+            EditCommandInEditor => self.edit_command_in_editor(ctx),
             CopyModeMove(motion) => self.copy_mode_move(*motion, ctx),
             CopyModeToggleVisual(selection_type) => {
                 self.copy_mode_toggle_visual(*selection_type, ctx)

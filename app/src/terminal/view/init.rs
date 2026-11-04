@@ -310,6 +310,17 @@ pub fn init(app: &mut AppContext) {
     .with_context_predicate(id!("Terminal") & id!("TerminalView_NonEmptyBlockList"))
     .with_enabled(|| FeatureFlag::PrefixKeys.is_enabled())]);
 
+    app.register_editable_bindings([EditableBinding::new(
+        "terminal:edit_command_in_editor",
+        "Edit command in $EDITOR",
+        TerminalAction::EditCommandInEditor,
+    )
+    .with_context_predicate(
+        id!("Terminal") & !id!("IMEOpen") & !id!("AltScreen") & !id!("LongRunningCommand"),
+    )
+    .with_key_binding("ctrl-x ctrl-e")
+    .with_enabled(|| FeatureFlag::EditCommandInEditor.is_enabled())]);
+
     app.register_editable_bindings([
         // Ctrl-G: toggle CLI agent rich input.
         // Three contexts match this binding:

@@ -1005,6 +1005,7 @@ pub enum FeatureFlag {
     AgentPromptSteering,
     PrefixKeys,
     ProjectSessions,
+    EditCommandInEditor,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
