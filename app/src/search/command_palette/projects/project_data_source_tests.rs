@@ -93,3 +93,28 @@ fn renamed_projects_match_their_visible_name_without_highlighting_the_path() {
     assert_eq!(matched[0].candidate.name, "Customer Portal");
     assert!(matched[0].match_result.matched_indices.is_empty());
 }
+
+#[test]
+fn rank_prefers_shorter_path_when_fuzzy_scores_tie() {
+    let candidates = merge_candidates(
+        &[],
+        Path::new(HOME),
+        vec![
+            PathBuf::from("/home/u/projects/rust-catchers"),
+            PathBuf::from("/home/u/projects/rust-catchers-llm"),
+        ],
+        Path::new(HOME),
+    );
+
+    let matched = rank_candidates(&candidates, "rust-ca");
+    assert_eq!(matched.len(), 2);
+    let short = matched
+        .iter()
+        .find(|item| item.candidate.display_path == "~/projects/rust-catchers")
+        .unwrap();
+    let long = matched
+        .iter()
+        .find(|item| item.candidate.display_path == "~/projects/rust-catchers-llm")
+        .unwrap();
+    assert!(short.score() > long.score());
+}
