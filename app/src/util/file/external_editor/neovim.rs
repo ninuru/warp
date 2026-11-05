@@ -4,6 +4,8 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use nix::unistd::{Pid, getpgid, tcgetpgrp};
+use sysinfo::{Pid as ProcessId, ProcessRefreshKind, ProcessesToUpdate, System};
 use warp_util::path::LineAndColumnArg;
 
 use crate::terminal::model::terminal_model::ShellProcessInfo;
@@ -21,27 +23,67 @@ pub fn is_neovim(editor: &str) -> bool {
     matches!(base.as_str(), "nvim" | "neovim")
 }
 
-pub fn foreground_pid(shell: &ShellProcessInfo) -> Option<u32> {
+pub fn foreground_process_group(shell: &ShellProcessInfo) -> Option<u32> {
     let fd = shell.pty_leader_fd?;
-    nix::unistd::tcgetpgrp(fd)
+    tcgetpgrp(fd)
         .ok()
         .map(|pid| pid.as_raw() as u32)
         .filter(|&pid| pid > 0)
 }
 
-pub fn server_socket_for_pid(pid: u32) -> Option<PathBuf> {
-    server_socket_in_dirs(&candidate_server_dirs(), pid)
+pub fn server_socket_for_process_group(process_group: u32) -> Option<PathBuf> {
+    server_socket_in_dirs(&candidate_server_dirs(), process_group)
 }
 
-pub(super) fn server_socket_in_dirs(dirs: &[PathBuf], pid: u32) -> Option<PathBuf> {
-    let prefix = format!("nvim.{pid}.");
+pub(super) fn server_socket_in_dirs(dirs: &[PathBuf], process_group: u32) -> Option<PathBuf> {
     dirs.iter().find_map(|dir| {
         std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
-            let is_match = entry.file_name().to_str()?.starts_with(&prefix)
-                && entry.file_type().ok()?.is_socket();
+            if !entry.file_type().ok()?.is_socket() {
+                return None;
+            }
+            let pid = entry
+                .file_name()
+                .to_str()?
+                .strip_prefix("nvim.")?
+                .split_once('.')?
+                .0
+                .parse::<i32>()
+                .ok()
+                .filter(|pid| *pid > 0)?;
+            let is_match = pid as u32 == process_group
+                || getpgid(Some(Pid::from_raw(pid)))
+                    .is_ok_and(|group| group.as_raw() as u32 == process_group)
+                || is_backend_of_foreground_neovim(pid, process_group);
             is_match.then(|| entry.path())
         })
     })
+}
+
+// Neovim's interactive TUI can launch its RPC backend in a separate process group.
+fn is_backend_of_foreground_neovim(pid: i32, process_group: u32) -> bool {
+    let mut system = System::new();
+    let pid = ProcessId::from_u32(pid as u32);
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    let Some(parent) = system.process(pid).and_then(|process| process.parent()) else {
+        return false;
+    };
+    if !getpgid(Some(Pid::from_raw(parent.as_u32() as i32)))
+        .is_ok_and(|group| group.as_raw() as u32 == process_group)
+    {
+        return false;
+    }
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[parent]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    system
+        .process(parent)
+        .is_some_and(|process| process.name().to_str().is_some_and(is_neovim))
 }
 
 fn candidate_server_dirs() -> Vec<PathBuf> {

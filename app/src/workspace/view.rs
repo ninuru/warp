@@ -6782,8 +6782,8 @@ impl Workspace {
                 .copied();
             let socket = shell
                 .as_ref()
-                .and_then(neovim::foreground_pid)
-                .and_then(neovim::server_socket_for_pid);
+                .and_then(neovim::foreground_process_group)
+                .and_then(neovim::server_socket_for_process_group);
             if let Some(socket) = socket {
                 running = Some((pane_id, socket));
                 break;

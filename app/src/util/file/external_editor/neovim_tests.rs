@@ -2,6 +2,9 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
+use command::r#async::Command as AsyncCommand;
+use command::blocking::Command;
+use futures_lite::future::block_on;
 use tempfile::TempDir;
 use warp_util::path::LineAndColumnArg;
 
@@ -77,7 +80,22 @@ fn finds_socket_matching_pid() {
 #[test]
 fn finds_backend_socket_in_foreground_process_group() {
     let dir = TempDir::new().unwrap();
-    let mut backend = std::process::Command::new("sleep")
+    let mut backend = Command::new("sleep").arg("30").spawn().unwrap();
+    let socket = dir.path().join(format!("nvim.{}.0", backend.id()));
+    let _listener = UnixListener::bind(&socket).unwrap();
+    let group = nix::unistd::getpgrp().as_raw() as u32;
+
+    let found = server_socket_in_dirs(&[dir.path().to_path_buf()], group);
+
+    backend.kill().unwrap();
+    backend.wait().unwrap();
+    assert_eq!(found, Some(socket));
+}
+
+#[test]
+fn ignores_socket_in_another_process_group() {
+    let dir = TempDir::new().unwrap();
+    let mut backend = AsyncCommand::new_with_process_group("sleep")
         .arg("30")
         .spawn()
         .unwrap();
@@ -88,8 +106,8 @@ fn finds_backend_socket_in_foreground_process_group() {
     let found = server_socket_in_dirs(&[dir.path().to_path_buf()], group);
 
     backend.kill().unwrap();
-    backend.wait().unwrap();
-    assert_eq!(found, Some(socket));
+    block_on(backend.status()).unwrap();
+    assert_eq!(found, None);
 }
 
 fn fake_server(reply: Vec<u8>) -> (TempDir, PathBuf, std::thread::JoinHandle<Vec<u8>>) {
