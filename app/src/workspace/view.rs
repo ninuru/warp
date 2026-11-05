@@ -6689,6 +6689,13 @@ impl Workspace {
                         return;
                     }
 
+                    #[cfg(unix)]
+                    if crate::util::file::external_editor::neovim::is_neovim(editor_env)
+                        && self.open_in_running_neovim(&path, line_col, ctx)
+                    {
+                        return;
+                    }
+
                     // If we have an editor string but it's not a known Editor, we try to run it in a new pane
                     let new_pane_id =
                         self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
@@ -6745,6 +6752,61 @@ impl Workspace {
             }
             FileTarget::SystemGeneric => {
                 ctx.open_file_path(&path);
+            }
+        }
+    }
+
+    #[cfg(all(feature = "local_fs", unix))]
+    fn open_in_running_neovim(
+        &mut self,
+        path: &Path,
+        line_col: Option<LineAndColumnArg>,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        use crate::util::file::external_editor::neovim;
+
+        let pane_group = self.active_tab_pane_group().clone();
+        let mut running = None;
+        for pane_id in pane_group.as_ref(ctx).visible_pane_ids() {
+            let Some(terminal_view) = pane_group
+                .as_ref(ctx)
+                .terminal_view_from_pane_id(pane_id, ctx)
+            else {
+                continue;
+            };
+            let shell = terminal_view
+                .as_ref(ctx)
+                .model
+                .lock()
+                .shell_process_info()
+                .copied();
+            let socket = shell
+                .as_ref()
+                .and_then(neovim::foreground_process_group)
+                .and_then(neovim::server_socket_for_process_group);
+            if let Some(socket) = socket {
+                running = Some((pane_id, socket));
+                break;
+            }
+        }
+        let Some((pane_id, socket)) = running else {
+            return false;
+        };
+
+        match neovim::open_in_server(&socket, path, line_col) {
+            Ok(()) => {
+                pane_group.update(ctx, |pane_group, ctx| {
+                    pane_group.reveal_and_focus_pane(pane_id, ctx);
+                    pane_group.focus(ctx);
+                });
+                true
+            }
+            Err(err) => {
+                log::warn!(
+                    "Could not open file in the running Neovim: {:?}",
+                    err.kind()
+                );
+                false
             }
         }
     }

@@ -2,6 +2,8 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(unix)]
+pub mod neovim;
 pub mod settings;
 #[cfg(target_os = "windows")]
 mod windows;
